@@ -1,13 +1,24 @@
+# Math Client
+import struct
 import socket
-import sys
 
-HOST, PORT = "localhost", 8888
-data = " ".join(sys.argv[1:])
+udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+while True:
+    # Get user input (This should have validation)
+    op, a, b = input(">").split()
+    a = int(a)
+    b = int(b)
+    op = op.encode('ascii')
 
-sock.sendto(data + "\n", (HOST, PORT))
-received = sock.recv(1024)
+    # Pack the data and send it to the server
+    binary = struct.pack(">3sii", op, a, b)
+    udp_socket.sendto(binary, ("localhost", 5000))
 
-print("Sent:     {}".format(data))
-print("Received: {}".format(received))
+    # Receive and print the result if successful
+    binary = udp_socket.recv(512)
+    success, result = struct.unpack(">bi", binary)
+    if success == 1:
+        print("Result:",result)
+    else:
+        print("Unable to complete calculation")
