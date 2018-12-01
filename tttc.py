@@ -39,6 +39,7 @@ import getopt, sys, struct
 #CONSTANTS & GLOBALS
 client_socket = socket(AF_INET, SOCK_DGRAM)
 TTT_SERVER_PORT = 13037
+SERVER_ADDRESS = ('', TTT_SERVER_PORT)
 
 TTT_PRTCL_REQUEST_FIRST_ARGS = "Please send an unsigned int representing if the client wishes to make the first move.\n\t0 -- sever should go first\n\t1 -- client should go first"
 TTT_PRTCL_GOT_FIRST_ARGS_ERR = "Failed to receive proper game initiation arguments. Terminating connection.\nNext time " + TTT_PRTCL_REQUEST_FIRST_ARGS
@@ -78,22 +79,23 @@ def recv_server_response():
 		<MESSAGE> Valid values are:
 			A string with a message.
 	'''
+
 	ret_list = []
 	#recv a message length from the server
-	server_msg_len_buf = recvall(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
+	server_msg_len_buf = client_socket.recvfrom(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
 	if not server_msg_len_buf:
 		return None
-	server_msg_len, = struct.unpack("!I", server_msg_len_buf)
+	server_msg_len, = struct.unpack("!I", server_msg_len_buf[0])
 	
 	#recv a message from the server	
-	server_msg = recvall(server_msg_len).decode()
-	ret_list.append(server_msg) 
+	server_msg = client_socket.recvfrom(server_msg_len)#recvall(server_msg_len).decode()
+	ret_list.append(server_msg[0].decode()) 
 
 	#recv an int value of the expexted response value
-	expecting_response_buf = recvall(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
+	expecting_response_buf = client_socket.recvfrom(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)#recvall(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
 	if not expecting_response_buf:
 		return None
-	expecting_response, = struct.unpack("!I", expecting_response_buf)
+	expecting_response, = struct.unpack("!I", expecting_response_buf[0])
 	#add expcted response value to list	
 	try:
 		ret_list.insert(0, expecting_response)
@@ -163,7 +165,7 @@ def get_single_digit_response(message):
 		print("ERROR @ TTTC.py::get_single_digit_response(): FAILED TO INTERPRET USER INPUT... TRYING AGAIN")
 		return get_single_digit_response(message)
 		
-def send_single_digit_response(num):
+def send_single_digit_response(num, addr):
 	'''
 	Sends an unsigned int value to the server
 	
@@ -172,7 +174,7 @@ def send_single_digit_response(num):
 		SEND PACKED: SINGLE DIGIT VAL
 	
 	'''
-	client_socket.send(struct.pack('!I', num))
+	client_socket.sendto(struct.pack('!I', num), addr)
 	
 
 def play_game(argv):
@@ -183,10 +185,11 @@ def play_game(argv):
 		an end of game message.
 		an error message.
 	'''
+
 	#get next server response
-	server_response = recv_server_response()
+	server_response = (-1,'')
 	while server_response:
-				
+		server_response = recv_server_response()
 		#check if termination message
 		if server_response[0] == TTT_PRTCL_TERMINATE:
 			#print the server message
@@ -202,12 +205,12 @@ def play_game(argv):
 		elif server_response[0] == TTT_PRTCL_EXPECTING_INT_RESPONSE:
 			#send single digit integer response and pass the message prompt to the getter
 			num = get_single_digit_response(server_response[1])
-			send_single_digit_response(num)
+			send_single_digit_response(num, SERVER_ADDRESS)
 
 		elif server_response[0] == TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE:
 			#send if the client goes first
 			num = parse_cmd_line_args(argv)
-			send_single_digit_response(num)
+			send_single_digit_response(num, SERVER_ADDRESS)
 			print("successfully set TTT_PRTCL_REQUEST_FIRST_ARGS")
 
 		#get next server response
@@ -219,21 +222,18 @@ def main(argv):
 	
 	argv -- list with [-c] [-s serverIP]
 	'''
+	global SERVER_ADDRESS
 	ttt_server_name = 'ERROR'
 	#set server
 	for i, v in enumerate(argv):
 		if v == "-s":
 			ttt_server_name = argv[i + 1]
 	
-	server_address = (ttt_server_name, TTT_SERVER_PORT)
-	#attempt to connect to server
-	#test? try:
-	#test? 	client_socket.connect((ttt_server_name, TTT_SERVER_PORT))
-	#test? except socket_err:
-	#test? 	#clean exit
-	#test? 	print("ERROR @ TTTC.py::main(): FAILED TO CONNECT TO TCP SERVER... ABORTING")
-	#test? 	sys.exit(1)
-
+	SERVER_ADDRESS = (ttt_server_name, TTT_SERVER_PORT)
+	#notify server we want to make a game so we send it the init args
+	num = parse_cmd_line_args(argv)
+	send_single_digit_response(num, SERVER_ADDRESS)
+	print("successfully set TTT_PRTCL_REQUEST_FIRST_ARGS")
 	#play the game
 	play_game(argv)
 
