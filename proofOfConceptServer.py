@@ -10,7 +10,7 @@ import sys, select, struct
 ACTIVE_GAMES = []	#the global array to store the active games
 CLIENT_QUEUE = []
 UNIQUE_ID_COUNTER = 0	#the global uniqie ID index to ensure no duplicate games
-
+'''
 def myObj:
 	def __init__(self, addr, uid):
 		self.addr = addr
@@ -35,7 +35,7 @@ def main2():
 			#receive a message.
 			msg, addr = SOCK.recvfrom(2048)
 			print("\nAddress: ", addr, "\nSent: ", msg)
-			'''CLIENT_QUEUE.append((addr, msg))
+			' ''CLIENT_QUEUE.append((addr, msg))
 			#check if game already exists from the sender
 			current_index = get_active_game_index_or_none(addr)
 			if current_index is not None:
@@ -47,7 +47,7 @@ def main2():
 			
 			#create new thread for this client
 			#UDP? start_new_thread(game_thread,(addr, ACTIVE_GAMES[-1]))
-			'''
+			'' '
 			
 	except KeyboardInterrupt:
 		#dont crash program... allow for cleanup
@@ -56,7 +56,7 @@ def main2():
 		#UDP? 	v.conn.close()
 		#UDP? SOCK.close()
 		sys.exit(0)
-
+'''
 # Math Server
 import struct
 import socket
