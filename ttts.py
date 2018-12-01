@@ -47,6 +47,7 @@ UNUSED_MARK = 0
 CATS_GAME = -1
 
 ACTIVE_GAMES = []	#the global array to store the active games
+CLIENT_MESSAGE_QUEUE = []
 UNIQUE_ID_COUNTER = 0	#the global uniqie ID index to ensure no duplicate games
 
 TTT_PRTCL_REQUEST_FIRST_ARGS = "Please send an unsigned int representing if the client wishes to make the first move.\n\t0 -- sever should go first\n\t1 -- client should go first"
@@ -60,9 +61,6 @@ TTT_PRTCL_EXPECTING_NO_RESPONSE = 1
 TTT_PRTCL_EXPECTING_INT_RESPONSE = 2
 TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE = 3
 TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE = 4 #4 is the size of a packed '!I' value
-
-GAME_STATE_INIT
-GAME_STATE_RUN
 
 class TTT_Game:
 
