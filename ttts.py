@@ -98,13 +98,11 @@ class TTT_Game:
 			addr -- the address of the connection
 			active_game -- the TTT_Game object with the game info
 		'''
-		print ("Starting new game...")
-		self.print_game_info()
-
+		print("INITALIZING NEW GAME")
 		#SEND REQUEST WHO WILL BE GOING FIRST. CLIENT OR SERVER
-		send_server_response(self.addr, TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE, TTT_PRTCL_REQUEST_FIRST_ARGS)
+		send_server_response(conn, TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE, TTT_PRTCL_REQUEST_FIRST_ARGS)
 		#GET RESPONSE
-		cmd_line_args = get_client_response(addr)
+		cmd_line_args = get_client_response(conn)
 
 		#validate the messages, if invalid terminate connection
 		if not validate_TTT_PRTCL("SRVR_RECV_REQUEST_SINGLE_DIGIT_INPUT", cmd_line_args):
@@ -113,12 +111,23 @@ class TTT_Game:
 			#SEND TERMINATION ERROR MESSAGE
 			err_msg = TTT_PRTCL_CLIENT_ERR + "\n" + TTT_PRTCL_REQUEST_FIRST_ARGS
 			send_server_response(conn, TTT_PRTCL_TERMINATE, err_msg)
-			return remove_active_game(active_game)
+			return remove_active_game(self)
 	
 		#valid arguments... 
 		#if client goes first, update the game status thereby giving the first player the 'X' mark
 		if cmd_line_args:
-			active_game.reinit_vals(CLIENT_MARK)
+			self.reinit_vals(CLIENT_MARK)
+
+		#we have all the info we need, time to start the game!
+
+		#sends instructions to client
+		#SENDS MESSAGE INSTRUCTIONS
+		send_server_response(conn, TTT_PRTCL_EXPECTING_NO_RESPONSE, TTT_PRTCL_INSTRUCTIONS)
+
+		print("********STARTING GAME ID: {0} ********".format(self.uid))
+		self.print_game_info()		#TODO: DELETE AFTER DEBUG
+
+
 
 	#we have all the info we need, time to start the game!
 	def reinit_vals(self, turn):
@@ -401,8 +410,56 @@ class TTT_Game:
 		ARGUMENTS:
 			msg -- the message from the client
 		'''
+		endgame_status = self.check_for_win()
+	
+		if endgame_status != UNUSED_MARK:
+			#if client turn
+			if self.get_turn() == CLIENT_MARK:
+				#send game board and instructions to client, along with expecting int response
+				#SEND REQUEST FOR CLIENT MOVE 
+				message = self.get_board_as_string() + TTT_PRTCL_REQUEST_CLIENT_TURN[29:]
+				send_server_response(conn, TTT_PRTCL_EXPECTING_INT_RESPONSE, message)
 
-		if str(msg).isdigit():
+				#get and validate client response
+				#get int response from client
+				#GET RESPONSE
+				client_move = get_client_response(conn)
+
+				#if client move is None, it most likely means user process terminated, 
+				#or if client move is 9, it means they requested to exit,
+				#so terminate connetion
+				if client_move is None or client_move == 9:
+					print("ERROR @ ttts.py::TTT_Game::pass_client_message(): GOT USER RESPONSE OF " + str(client_move) + ". TERMINATING SERVER-CLIENT SESSION." + "\nGAME ID: {0}".format(self.uid))
+					#close down game
+					return remove_active_game(self)
+
+				#else if we got an invalid response, log error and continue
+				elif not validate_TTT_PRTCL("SRVR_RECV_REQUEST_SINGLE_DIGIT_INPUT", client_move):
+					print("ERROR @ ttts.py::TTT_Game::pass_client_message(): GOT INVALID INPUT FROM CLIENT." + "\nGAME ID: {0}".format(self.uid))
+
+				#else we got a valid response
+				else:
+					#attempt to make the client move
+					if self.make_client_move(int(client_move)):
+						#change turns if valid move
+						self.change_turn()
+					else:
+						#else if move falied. print err msg and cry. dont change turns so that we ask them 
+						#again on the next loop
+						print("ERROR @ ttts.py::TTT_Game::pass_client_message(): FAILED TO MAKE CLIENT MOVE." + "\nGAME ID: {0}".format(self.uid))
+			#if server turn
+			elif self.get_turn() == SERVER_MARK:
+				#request SERVER to take turn
+				if self.take_server_turn():
+					#attempt to make a move, if successful then change turns, and send the updated game board to the client
+					self.change_turn()
+				else:
+					#else if move falied. print err msg and cry. dont change turns so that we ask them again on next loop
+					print("ERROR @ ttts.py::TTT_Game::pass_client_message(): FAILED TO MAKE SERVER MOVE." + "\nGAME ID: {0}".format(self.uid))
+					self.print_game_info()
+
+			#end of turn, check board to see if game has ended or not
+			endgame_status = self.check_for_win()
 
 
 
@@ -454,8 +511,8 @@ def send_server_response(addr, expecting_response_val, message):
 	#SEND PACKED: EXPECTING RESPONSE VAL
 	conn.sendto(struct.pack('!I', expecting_response_val), addr)	
 
-	
-def get_client_response(conn):
+#TODO DELETE THIS FUNC?
+def get_client_response(addr):
 	'''
 	Recv's one message from the client:
 	1. <unsigned int> a response value (packed)
@@ -465,7 +522,7 @@ def get_client_response(conn):
 		unpack '!I'
 
 	ARGUMENTS:
-		conn -- the connection
+		addr -- the address receive from
 
 	RETURNS:
 		<unsigned int> -- a single digit value
@@ -507,7 +564,8 @@ def recvall(conn, size):
 
 def remove_active_game(active_game):
 	'''
-	Removes a game from the ACTIVE_GAMES list and closes that connection.
+	Completes the game, sends the termination message and
+	Removes the game from the ACTIVE_GAMES list.
 	
 	ARGUMENTS:
 		active_game -- the game to remove
@@ -516,110 +574,6 @@ def remove_active_game(active_game):
 		True -- successful connection closure and active game removed
 		False -- something went wrong during closure and removal
 	'''
-	try:
-		active_game.conn.close()
-		ACTIVE_GAMES.remove(active_game)
-		return True
-	except:
-		return False
-
-def game_thread(conn, addr, active_game):
-	'''
-	The game logic. Gets the command line args from client and initalizes 
-	the game info. Sends instructions to client.
-	Plays the game between the client and server. Sends a message with the 
-	board and the winner. Closes the connection.
-	
-	ARGUMENTS:
-		conn -- the server socket connection
-		addr -- the address of the connection
-		active_game -- the TTT_Game object with the game info
-	'''
-	print("Starting new game...")
-	active_game.print_game_info()
-
-	#SEND REQUEST WHO WILL BE GOING FIRST. CLIENT OR SERVER
-	send_server_response(conn, TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE, TTT_PRTCL_REQUEST_FIRST_ARGS)
-	#GET RESPONSE
-	cmd_line_args = get_client_response(conn)
-
-	#validate the messages, if invalid terminate connection
-	if not validate_TTT_PRTCL("SRVR_RECV_REQUEST_SINGLE_DIGIT_INPUT", cmd_line_args):
-		print("ERROR @ ttts.py::game_thread(): INVALID COMMAND LINE ARGS.")
-
-		#SEND TERMINATION ERROR MESSAGE
-		err_msg = TTT_PRTCL_CLIENT_ERR + "\n" + TTT_PRTCL_REQUEST_FIRST_ARGS
-		send_server_response(conn, TTT_PRTCL_TERMINATE, err_msg)
-		return remove_active_game(active_game)
-	
-	#valid arguments... 
-	#if client goes first, update the game status thereby giving the first player the 'X' mark
-	if cmd_line_args:
-		active_game.reinit_vals(CLIENT_MARK)
-
-	#we have all the info we need, time to start the game!
-
-	#sends instructions to client
-	#SENDS MESSAGE INSTRUCTIONS
-	send_server_response(conn, TTT_PRTCL_EXPECTING_NO_RESPONSE, TTT_PRTCL_INSTRUCTIONS)
-
-	print("********STARTING GAME ID: {0} ********".format(active_game.uid))
-	active_game.print_game_info()		#TODO: DELETE AFTER DEBUG
-	endgame_status = active_game.check_for_win()
-	
-	#start game process
-	while endgame_status == UNUSED_MARK:
-		#if client turn
-		if active_game.get_turn() == CLIENT_MARK:
-			#send game board and instructions to client, along with expecting int response
-			#SEND REQUEST FOR CLIENT MOVE 
-			message = active_game.get_board_as_string() + TTT_PRTCL_REQUEST_CLIENT_TURN[29:]
-			send_server_response(conn, TTT_PRTCL_EXPECTING_INT_RESPONSE, message)
-
-			#get and validate client response
-			#get int response from client
-			#GET RESPONSE
-			client_move = get_client_response(conn)
-
-			#if client move is None, it most likely means user process terminated, 
-			#or if client move is 9, it means they requested to exit,
-			#so terminate connetion
-			if client_move is None or client_move == 9:
-				print("ERROR @ ttts.py::game_thread(): GOT USER RESPONSE OF " + str(client_move) + ". TERMINATING SERVER-CLIENT SESSION." + "\nGAME ID: {0}".format(active_game.uid))
-				#close down game
-				return remove_active_game(active_game)
-
-			#else if we got an invalid response, log error and continue
-			elif not validate_TTT_PRTCL("SRVR_RECV_REQUEST_SINGLE_DIGIT_INPUT", client_move):
-				print("ERROR @ ttts.py::game_thread(): GOT INVALID INPUT FROM CLIENT." + "\nGAME ID: {0}".format(active_game.uid))
-
-			#else we got a valid response
-			else:
-				#attempt to make the client move
-				if active_game.make_client_move(int(client_move)):
-					#change turns if valid move
-					active_game.change_turn()
-				else:
-					#else if move falied. print err msg and cry. dont change turns so that we ask them 
-					#again on the next loop
-					print("ERROR @ ttts.py::game_thread(): FAILED TO MAKE CLIENT MOVE." + "\nGAME ID: {0}".format(active_game.uid))
-		#if server turn
-		elif active_game.get_turn() == SERVER_MARK:
-			#request SERVER to take turn
-			if active_game.take_server_turn():
-				#attempt to make a move, if successful then change turns, and send the updated game board to the client
-				active_game.change_turn()
-			else:
-				#else if move falied. print err msg and cry. dont change turns so that we ask them again on next loop
-				print("ERROR @ ttts.py::game_thread(): FAILED TO MAKE SERVER MOVE." + "\nGAME ID: {0}".format(active_game.uid))
-				active_game.print_game_info()
-
-		#end of turn, check board to see if game has ended or not
-		endgame_status = active_game.check_for_win()
-		
-		#end while loop
-
-
 	print("********ENDING GAME ID: {0} ********".format(active_game.uid))
 	active_game.print_game_info()		#TODO: DELETE AFTER DEBUG
 	#end game logic
@@ -635,10 +589,14 @@ def game_thread(conn, addr, active_game):
 		endgame_message = endgame_message + "\nENDGAME ERROR:\nCLIENT: {client_char}\nSERVER: {server_char} ".format(client_char = active_game.client_char, server_char = active_game.server_char)
 	
 	#SEND TERMINATION WITH END GAME MESSAGE
-	send_server_response(conn, TTT_PRTCL_TERMINATE, endgame_message)	
+	send_server_response(active_game.addr, TTT_PRTCL_TERMINATE, endgame_message)	
 	
-	return remove_active_game(active_game)
-	
+	try:
+		ACTIVE_GAMES.remove(active_game)
+		return True
+	except:
+		return False
+		
 
 def get_active_game_index_or_none(addr):
 	'''
@@ -675,7 +633,6 @@ def parse_message_thread(addr, message):
 		ACTIVE_GAMES.append(0, new_game)
 		#TODO i hope this appends a address and not some copy that leads to wacky multithreading issues
 
-		
 
 def main():
 	'''
