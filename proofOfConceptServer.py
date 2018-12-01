@@ -1,30 +1,61 @@
-import SocketServer, threading, time
+from _thread import *
+from socket import *
+import sys, select, struct
 
-class ThreadedUDPRequestHandler(SocketServer.BaseRequestHandler):
+#SETUP UDP DATAGRAM SOCKET
+SOCK = socket(AF_INET, SOCK_DGRAM)
+TTT_SERVER_PORT = 13037
+SOCK.bind(('',TTT_SERVER_PORT))
 
-    def handle(self):
-        data = self.request[0].strip()
-        socket = self.request[1]
-        current_thread = threading.current_thread()
-        print("{}: client: {}, wrote: {}".format(current_thread.name, self.client_address, data))
-        socket.sendto(data.upper(), self.client_address)
+ACTIVE_GAMES = []	#the global array to store the active games
+CLIENT_QUEUE = []
+UNIQUE_ID_COUNTER = 0	#the global uniqie ID index to ensure no duplicate games
 
-class ThreadedUDPServer(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
-    pass
+def myObj:
+	def __init__(self, addr, uid):
+		self.addr = addr
+		self.uid = uid
 
-if __name__ == "__main__":
-    HOST, PORT = "0.0.0.0", 8888
+		
+		
+def get_active_game_index_or_none(addr):
+	for i, game in enumerate(ACTIVE_GAMES):
+		if game.addr == addr:
+			return i
+		
+	return None
 
-    server = ThreadedUDPServer((HOST, PORT), ThreadedUDPRequestHandler)
+def main():
+	global UNIQUE_ID_COUNTER
 
-    server_thread = threading.Thread(target=server.serve_forever)
-    server_thread.daemon = True
 
-    try:
-        server_thread.start()
-        print("Server started at {} port {}".format(HOST, PORT))
-        while True: time.sleep(100)
-    except (KeyboardInterrupt, SystemExit):
-        server.shutdown()
-        server.server_close()
-        exit()
+	print ('The server is ready to receive connections')
+	try:
+		while 1:
+			#receive a message.
+			msg, addr = SOCK.recvfrom(2048)
+			print("\nAddress: ", addr, "\nSent: ", msg)
+			'''CLIENT_QUEUE.append((addr, msg))
+			#check if game already exists from the sender
+			current_index = get_active_game_index_or_none(addr)
+			if current_index is not None:
+				ACTIVE_GAMES[current_index].pass_client_message(msg)
+			else:
+				#create a game state
+				ACTIVE_GAMES.append(TTT_Game(addr, UNIQUE_ID_COUNTER))
+				UNIQUE_ID_COUNTER += 1
+			
+			#create new thread for this client
+			#UDP? start_new_thread(game_thread,(addr, ACTIVE_GAMES[-1]))
+			'''
+			
+	except KeyboardInterrupt:
+		#dont crash program... allow for cleanup
+		print("\nCLOSING DOWN TIC-TAC-TOE SERVER")
+		#UDP? for v in ACTIVE_GAMES:
+		#UDP? 	v.conn.close()
+		#UDP? SOCK.close()
+		sys.exit(0)
+		
+if __name__ == '__main__':
+	main()
