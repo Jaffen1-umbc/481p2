@@ -67,7 +67,7 @@ def main():
 
 	while True:
 		# Receive and unpack the data
-		data, address = udp_socket.recvfrom(512)
+		data, address = udp_socket.recvfrom(2048)
 		
 		try:
 			op, a, b = struct.unpack(">3sii", data)

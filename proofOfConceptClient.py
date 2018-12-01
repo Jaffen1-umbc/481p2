@@ -14,7 +14,10 @@ while True:
     # Pack the data and send it to the server
     binary = struct.pack(">3sii", op, a, b)
     udp_socket.sendto(binary, ("localhost", 5000))
-
+    binary = struct.pack(">3sii", op, a, b)
+    udp_socket.sendto(binary, ("localhost", 5000))
+    binary = struct.pack(">3sii", op, a, b)
+    udp_socket.sendto(binary, ("localhost", 5000))
     # Receive and print the result if successful
     binary = udp_socket.recv(512)
     success, result = struct.unpack(">bi", binary)

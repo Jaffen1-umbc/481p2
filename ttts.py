@@ -34,7 +34,7 @@ from socket import *
 from random import shuffle 
 import sys, select, struct
 
-		
+				
 #SETUP UDP DATAGRAM SOCKET
 SOCK = socket(AF_INET, SOCK_DGRAM)
 TTT_SERVER_PORT = 13037
@@ -47,7 +47,7 @@ UNUSED_MARK = 0
 CATS_GAME = -1
 
 ACTIVE_GAMES = []	#the global array to store the active games
-CLIENT_MESSAGE_QUEUE = []
+CLIENT_MESSAGE_QUEUE = []   #the global array to store the incoming messages
 UNIQUE_ID_COUNTER = 0	#the global uniqie ID index to ensure no duplicate games
 
 TTT_PRTCL_REQUEST_FIRST_ARGS = "Please send an unsigned int representing if the client wishes to make the first move.\n\t0 -- sever should go first\n\t1 -- client should go first"
@@ -86,6 +86,41 @@ class TTT_Game:
 		self.server_char = server_char
 		self.client_char = client_char
 
+	def do_setup(self):
+		''' 
+		The game logic. Gets the command line args from client and initalizes 
+		the game info. Sends instructions to client.
+		Plays the game between the client and server. Sends a message with the 
+		board and the winner. Closes the connection.
+	
+		ARGUMENTS:
+			conn -- the server socket connection
+			addr -- the address of the connection
+			active_game -- the TTT_Game object with the game info
+		'''
+		print ("Starting new game...")
+		self.print_game_info()
+
+		#SEND REQUEST WHO WILL BE GOING FIRST. CLIENT OR SERVER
+		send_server_response(self.addr, TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE, TTT_PRTCL_REQUEST_FIRST_ARGS)
+		#GET RESPONSE
+		cmd_line_args = get_client_response(addr)
+
+		#validate the messages, if invalid terminate connection
+		if not validate_TTT_PRTCL("SRVR_RECV_REQUEST_SINGLE_DIGIT_INPUT", cmd_line_args):
+			print("ERROR @ ttts.py::TTT_Game::do_setup(): INVALID COMMAND LINE ARGS.")
+
+			#SEND TERMINATION ERROR MESSAGE
+			err_msg = TTT_PRTCL_CLIENT_ERR + "\n" + TTT_PRTCL_REQUEST_FIRST_ARGS
+			send_server_response(conn, TTT_PRTCL_TERMINATE, err_msg)
+			return remove_active_game(active_game)
+	
+		#valid arguments... 
+		#if client goes first, update the game status thereby giving the first player the 'X' mark
+		if cmd_line_args:
+			active_game.reinit_vals(CLIENT_MARK)
+
+	#we have all the info we need, time to start the game!
 	def reinit_vals(self, turn):
 		'''
 		Allows for reinitalization of certain values that was not known
@@ -603,7 +638,7 @@ def game_thread(conn, addr, active_game):
 	send_server_response(conn, TTT_PRTCL_TERMINATE, endgame_message)	
 	
 	return remove_active_game(active_game)
-
+	
 
 def get_active_game_index_or_none(addr):
 	'''
@@ -622,26 +657,39 @@ def get_active_game_index_or_none(addr):
 	return None 
 
 
-	
-def main():
+def parse_message_thread(addr, message):
 	global UNIQUE_ID_COUNTER
+	#check if game already exists from the sender
+	current_index = get_active_game_index_or_none(addr)
+	if current_index is not None:
+		ACTIVE_GAMES[current_index].pass_client_message(msg)
+	else:
+		new_game = TTT_Game(addr, UNIQUE_ID_COUNTER)
+		
+		#bc UNIQUE_ID_COUNTER never goes down we dont need to worry about locks
+		UNIQUE_ID_COUNTER += 1
+		new_game.do_setup()
+		
+		#insert game at 0 so that the more connections we have the newer ones
+		# are found faster
+		ACTIVE_GAMES.append(0, new_game)
+		#TODO i hope this appends a address and not some copy that leads to wacky multithreading issues
 
+		
+
+def main():
+	'''
+		main function. Receives messages and starts a thread to figure out what to 
+		do with them.
+	''' 
 	print ('The server is ready to receive connections')
 	try:
 		while 1:
 			#receive a message.
 			msg, addr = SOCK.recvfrom(2048)
-			#check if game already exists from the sender
-			current_index = get_active_game_index_or_none(addr)
-			if current_index is not None:
-				ACTIVE_GAMES[current_index].pass_client_message(msg)
-			else:
-				#create a game state
-				ACTIVE_GAMES.append(TTT_Game(addr, UNIQUE_ID_COUNTER))
-				UNIQUE_ID_COUNTER += 1
 			
-			#create new thread for this client
-			#UDP? start_new_thread(game_thread,(addr, ACTIVE_GAMES[-1]))
+			#create a thread that figures out what to do with the message
+			start_new_thread(parse_message_thread, (addr, msg))
 
 			
 	except KeyboardInterrupt:
@@ -654,3 +702,20 @@ def main():
 		
 if __name__ == '__main__':
 	main()
+	
+	
+
+'''
+	I want to be able to make server that
+	1 main thread to: 
+		on new connections
+			makes a thread to: 
+				creates a game and puts it into ACTIVE_GAMES
+				run the starting procedures
+		
+		on reooccuring connections
+			make a thread to:
+				tells a game in ACTIVE_GAMES that this message was for them
+				the game takes care of the message
+				sends a reply
+'''
