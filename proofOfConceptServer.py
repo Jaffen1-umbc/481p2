@@ -68,6 +68,7 @@ def main():
 	while True:
 		# Receive and unpack the data
 		data, address = udp_socket.recvfrom(512)
+		
 		try:
 			op, a, b = struct.unpack(">3sii", data)
 			op = op.decode('ascii')
@@ -93,7 +94,7 @@ def main():
 		elif op == "div" and b != 0:
 			result = a // b
 			success = 1
-
+		print("\naddr: ", address, "\nMsg: ", data)
 		# Pack and send the result
 		binary = struct.pack(">bi", success, result)
 		udp_socket.sendto(binary, address)
