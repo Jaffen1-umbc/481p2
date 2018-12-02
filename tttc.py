@@ -82,20 +82,27 @@ def recv_server_response():
 
 	ret_list = []
 	#recv a message length from the server
-	server_msg_len_buf = client_socket.recvfrom(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
+	server_msg_len_buf = client_socket.recvfrom(512)#TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
 	if not server_msg_len_buf:
 		return None
 	server_msg_len, = struct.unpack("!I", server_msg_len_buf[0])
 	
+	print("Recving msg of len: ", server_msg_len) #TODO DEBUG  
+	
 	#recv a message from the server	
-	server_msg = client_socket.recvfrom(server_msg_len)#recvall(server_msg_len).decode()
-	ret_list.append(server_msg[0].decode()) 
+	server_msg, = client_socket.recvfrom(4096)#server_msg_len)#recvall(server_msg_len).decode()
+	ret_list.append(server_msg.decode()) 
 
+	print("Recved msg: ", server_msg[0])	#TODO DEBUG
+	
 	#recv an int value of the expexted response value
-	expecting_response_buf = client_socket.recvfrom(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)#recvall(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
+	expecting_response_buf = client_socket.recvfrom(512)#TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)#recvall(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
 	if not expecting_response_buf:
 		return None
 	expecting_response, = struct.unpack("!I", expecting_response_buf[0])
+	
+	print("Expecting response val: ", expecting_response)	#TODO DEBUG
+	
 	#add expcted response value to list	
 	try:
 		ret_list.insert(0, expecting_response)
@@ -189,8 +196,10 @@ def play_game(argv):
 	#get next server response
 	server_response = (-1,'')
 	while server_response:
+		print ("Awaiting server response...")
 		server_response = recv_server_response()
 		#check if termination message
+		print("GOT: ", server_response)
 		if server_response[0] == TTT_PRTCL_TERMINATE:
 			#print the server message
 			print(server_response[1])
@@ -212,9 +221,6 @@ def play_game(argv):
 			num = parse_cmd_line_args(argv)
 			send_single_digit_response(num, SERVER_ADDRESS)
 			print("successfully set TTT_PRTCL_REQUEST_FIRST_ARGS")
-
-		#get next server response
-		server_response = recv_server_response()
 		
 def main(argv):
 	'''
@@ -233,7 +239,7 @@ def main(argv):
 	#notify server we want to make a game so we send it the init args
 	num = parse_cmd_line_args(argv)
 	send_single_digit_response(num, SERVER_ADDRESS)
-	print("successfully set TTT_PRTCL_REQUEST_FIRST_ARGS")
+	print("Attempted to notify server we wanted to create a game.\nIf message recived is TTT_PRTCL_REQUEST_FIRST_ARGS, something broke and follow instructions.")
 	#play the game
 	play_game(argv)
 

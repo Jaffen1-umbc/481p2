@@ -2,7 +2,7 @@
 #TODO: DEBUG -- CHASE THE ERRORS, I THINK IM STUCK ON A BOTH AWAITING A RESPONSE.
 #TODO: DEBUG -- CHASE THE ERRORS, I THINK IM STUCK ON A BOTH AWAITING A RESPONSE.
 #TODO: DEBUG -- CHASE THE ERRORS, I THINK IM STUCK ON A BOTH AWAITING A RESPONSE.
-#TODO: DEBUG -- CHASE THE ERRORS, I THINK IM STUCK ON A BOTH AWAITING A RESPONSE.
+#TODO: DEBUG -- FIX LOCKING ERRORS
 
 
 #################################################################
@@ -35,11 +35,10 @@
 #		and the server which would allow someone to develop their own client or 
 #		server to interact with yours.
 ###########################
-
 from _thread import *	#_thread for python3, thread for python 2.7
 from socket import *
 from random import shuffle 
-import sys, select, struct
+import sys, select, struct, asyncio 
 
 				
 #SETUP UDP DATAGRAM SOCKET
@@ -48,12 +47,14 @@ TTT_SERVER_PORT = 13037
 SOCK.bind(('',TTT_SERVER_PORT))
 
 #CONSTANTS & GLOBALS
+SERVER_FIRST = 0
 SERVER_MARK = 1
 CLIENT_MARK = 2
 UNUSED_MARK = 0
 CATS_GAME = -1
 
 ACTIVE_GAMES = []	#the global array to store the active games
+ACTIVE_GAMES_IN_USE_MUTEX = False
 UNIQUE_ID_COUNTER = 0	#the global uniqie ID index to ensure no duplicate games
 
 TTT_PRTCL_REQUEST_FIRST_ARGS = "Please send an unsigned int representing if the client wishes to make the first move.\n\t0 -- sever should go first\n\t1 -- client should go first"
@@ -66,83 +67,39 @@ TTT_PRTCL_TERMINATE = 0
 TTT_PRTCL_EXPECTING_NO_RESPONSE = 1
 TTT_PRTCL_EXPECTING_INT_RESPONSE = 2
 TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE = 3
-TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE = 4 #4 is the size of a packed '!I' value
+TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE = 37 #37 for some reason is the new size of the packed value #4 #4 is the size of a packed '!I' value
 
 class TTT_Game:
 
-	def __init__(self, addr, uid, turn=SERVER_MARK, server_char='X', client_char='O'):
+	def __init__(self, addr, uid, turn):
 		'''
 		INITALIZE TIC TAC TOE GAME. Sets the appropriate values 
 		and creates an empty game board.
 
+		*changes from tcp version: removed customization potentials and order of
+		 game logic
 		ARGUMENTS:
 			addr -- the connected address
 			uid -- the unique ID of this game
-			turn -- who goes first (default SERVER_MARK)
-			server_char -- the char of the server (default X)
-			client_char -- the char of the client (default O)
+			turn -- who goes first. If it is 0, the server will go first, else 
+						the client goes first
+						
 		'''
-		
 		self.addr = addr
 		self.uid = uid
-		self.turn = turn
 		self.board = []
 		for i in range(9):
 			self.board.append(UNUSED_MARK)
-		self.server_char = server_char
-		self.client_char = client_char
-		self.awaiting_init_args = True
-		#SEND REQUEST WHO WILL BE GOING FIRST. CLIENT OR SERVER
-		#send_server_response(self.addr, TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE, TTT_PRTCL_REQUEST_FIRST_ARGS)
+			
+		#set the first players turn 
+		self.turn = SERVER_MARK if turn == SERVER_FIRST else CLIENT_MARK #or self.turn = turn + 1
+		self.server_char = 'X' if turn == SERVER_MARK else 'O' 
+		self.client_char = 'O' if turn == SERVER_MARK else 'X'
 		
-		
-	def do_setup(self, cmd_line_args):
-		''' 
-		Sets up game depending on if client or server to move first
-		'''
-		print("INITALIZING NEW GAME")
-		if self.awaiting_init_args:
-			print("ERROR @ ttts.py::TTT_Game::do_setup(): Tried to execute but still awaiting init args.")
-			return remove_active_game(self)
-
-		#validate the messages, if invalid terminate connection
-		if not validate_TTT_PRTCL("SRVR_RECV_REQUEST_SINGLE_DIGIT_INPUT", cmd_line_args):
-			print("ERROR @ ttts.py::TTT_Game::do_setup(): INVALID COMMAND LINE ARGS.\nGot: {0}".format(cmd_line_args))
-
-			#SEND TERMINATION ERROR MESSAGE
-			err_msg = TTT_PRTCL_CLIENT_ERR + "\n" + TTT_PRTCL_REQUEST_FIRST_ARGS
-			send_server_response(self.addr, TTT_PRTCL_TERMINATE, err_msg)
-			return remove_active_game(self)
-	
-		#valid arguments... 
-		#if client goes first, update the game status thereby giving the first player the 'X' mark
-		if cmd_line_args:
-			self.reinit_vals(CLIENT_MARK)
-
 		#we have all the info we need, time to start the game!
-
-		#sends instructions to client
-		#SENDS MESSAGE INSTRUCTIONS
-		send_server_response(self.addr, TTT_PRTCL_EXPECTING_NO_RESPONSE, TTT_PRTCL_INSTRUCTIONS)
-
 		print("********STARTING GAME ID: {0} ********".format(self.uid))
 		self.print_game_info()		#TODO: DELETE AFTER DEBUG
 
-
-
-	#we have all the info we need, time to start the game!
-	def reinit_vals(self, turn):
-		'''
-		Allows for reinitalization of certain values that was not known
-		 at game object creation time. Sets to the correct players turn
-		 and gives the player who has the first turn's mark to 'X'.
-
-		ARGUMENTS:
-			turn -- valid values are CLIENT_MARK and SERVER_MARK
-		'''
-		self.turn = turn
-		self.server_char = 'O' if turn == CLIENT_MARK else 'X' 
-		self.client_char = 'X' if turn == CLIENT_MARK else 'O'
 
 	def print_game_info(self):
 		'''
@@ -412,7 +369,6 @@ class TTT_Game:
 			client_msg -- the message from the client
 		'''
 		if self.awaiting_init_args:
-			self.awaiting_init_args = False
 			self.do_setup(client_msg)
 			return None
 	
@@ -584,6 +540,8 @@ def remove_active_game(active_game):
 		True -- successful connection closure and active game removed
 		False -- something went wrong during closure and removal
 	'''
+	global ACTIVE_GAMES_IN_USE_MUTEX
+	
 	print("********ENDING GAME ID: {0} ********".format(active_game.uid))
 	active_game.print_game_info()		#TODO: DELETE AFTER DEBUG
 	endgame_status = active_game.check_for_win()
@@ -605,7 +563,12 @@ def remove_active_game(active_game):
 	send_server_response(active_game.addr, TTT_PRTCL_TERMINATE, endgame_message)	
 	
 	try:
+		#old school locking bc asyncio and await isnt nice
+		while ACTIVE_GAMES_IN_USE_MUTEX:
+			pass
+		ACTIVE_GAMES_IN_USE_MUTEX = True
 		ACTIVE_GAMES.remove(active_game)
+		ACTIVE_GAMES_IN_USE_MUTEX = False
 		return True
 	except:
 		return False
@@ -614,7 +577,7 @@ def remove_active_game(active_game):
 def get_active_game_index_or_none(addr):
 	'''
 	Finds and returns the index of the game with the address given that is in the ACTIVE_GAMES list.
-	
+	Not thread safe, must aquire lock before calling this function.
 	ARGUMENTS:
 		addr -- the address of the connection
 	RETURNS:
@@ -631,7 +594,8 @@ def get_active_game_index_or_none(addr):
 def parse_message_thread(addr, msg):
 	'''
 	Parses a message received. Checks to see if the sender has an existing game, 
-	if they do, it passes the message to the game. If they dont, it will create 
+	if they do, it passes the message to the game. If they dont, it will check
+	for a valid command line args from the client and then create 
 	a new game for the client.
 	
 	ARGUMENTS:
@@ -640,25 +604,34 @@ def parse_message_thread(addr, msg):
 	'''
 	
 	global UNIQUE_ID_COUNTER
-	
-	#unpack message
-	
+	global ACTIVE_GAMES_IN_USE_MUTEX
+	print("Got message from: ", addr, "\nMsg: ", msg, "\n") #TODO DEBUG
+
+	while ACTIVE_GAMES_IN_USE_MUTEX:
+		pass
+	ACTIVE_GAMES_IN_USE_MUTEX = True
 	#check if game already exists from the sender
 	current_index = get_active_game_index_or_none(addr)
+
 	if current_index is not None:
 		ACTIVE_GAMES[current_index].pass_client_message(msg)
 	else:
-		new_game = TTT_Game(addr, UNIQUE_ID_COUNTER)
-		new_game.pass_client_message(msg)
-		
-		#bc UNIQUE_ID_COUNTER never goes down we dont need to worry about locks
-		UNIQUE_ID_COUNTER += 1
-		
-		#insert game at 0 so that the more connections we have the newer ones
-		# are found faster
-		ACTIVE_GAMES.insert(0, new_game)
-		#TODO i hope this appends a address and not some copy that leads to wacky multithreading issues
+		#else it is a first time connection, so create game if a valid cmd line arg 
+		if not validate_TTT_PRTCL("SRVR_RECV_REQUEST_SINGLE_DIGIT_INPUT", msg):
+			print("ERROR @ ttts.py::parse_message_thread(): INVALID CLIENT COMMAND LINE ARGS.\nGot: {0}".format(msg))
 
+			#send a request for the server response
+			err_msg = TTT_PRTCL_CLIENT_ERR + "\n" + TTT_PRTCL_REQUEST_FIRST_ARGS
+			send_server_response(self.addr, TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE, err_msg) 
+			
+		else:
+			#insert game at 0 so that the more connections we have the newer ones
+			# are found faster
+			ACTIVE_GAMES.insert(0, TTT_Game(addr, UNIQUE_ID_COUNTER, msg))
+			#bc UNIQUE_ID_COUNTER never goes down we dont need to worry about locks
+			UNIQUE_ID_COUNTER += 1
+	
+	ACTIVE_GAMES_IN_USE_MUTEX = False
 
 def main():
 	'''
@@ -673,15 +646,13 @@ def main():
 			print("From:\n{addr}\nRecv msg:\n{client_message}\n".format(addr = addr, client_message = client_message))
 			if client_message is not None:
 				#create a thread that figures out what to do with the message
-				start_new_thread(parse_message_thread, (addr, client_message))
-
+				#start_new_thread(parse_message_thread, (addr, client_message))
+				parse_message_thread(addr, client_message)
 			
 	except KeyboardInterrupt:
 		#dont crash program... allow for cleanup
 		print("\nCLOSING DOWN TIC-TAC-TOE SERVER")
-		#UDP? for v in ACTIVE_GAMES:
-		#UDP? 	v.conn.close()
-		#UDP? SOCK.close()
+		SOCK.close()
 		sys.exit(0)
 		
 if __name__ == '__main__':

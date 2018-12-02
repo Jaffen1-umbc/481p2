@@ -1,3 +1,29 @@
+Server workings:
+	listen to port for messages
+	create a new thread to deal with message
+	
+Client workings:
+	1. parse cmd line args
+	2. send server an int (1 for -c, 0 for not -c)
+	3. play the game
+	4. close
+	
+	3. play the game
+		a. get server response
+		b. check response with:
+			i. terminate response?
+				- print msg
+				- close game
+			ii. no response
+				- print msg
+			iii. expecting int response
+				- print prompt and get user response
+				- send response to server
+			iv. expecting first args
+				- if -c, send 1
+				- else send 0
+
+
 #################################################################
 #	Tic-Tac-Toe Protocol Explination			#
 #								#
