@@ -59,7 +59,7 @@ TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE = 37 #37 for some reason is the new size of t
 TTT_SERVER_PORT = 13037		
 #SETUP UDP DATAGRAM SOCKET
 SOCK = socket(AF_INET, SOCK_DGRAM)
-SOCK.setblocking(False)
+SOCK.settimeout(1)
 #SOCK.setblocking(True)
 SOCK.bind(('',TTT_SERVER_PORT))
 

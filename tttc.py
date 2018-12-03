@@ -41,8 +41,8 @@ from os import system, name
 
 #CONSTANTS & GLOBALS
 client_input = None
-client_socket = socket(AF_INET, SOCK_DGRAM )
-client_socket.setblocking(False)
+client_socket = socket(AF_INET, SOCK_DGRAM)
+client_socket.settimeout(1)
 TTT_SERVER_PORT = 13037
 SERVER_ADDRESS = ('', TTT_SERVER_PORT)
 
