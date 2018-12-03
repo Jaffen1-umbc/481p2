@@ -23,7 +23,12 @@ Client workings:
 				- if -c, send 1
 				- else send 0
 
-
+Server workings:
+	1. listen to port for messages
+	2. create a new thread to deal with message
+		a. if a game exists between that connection already, send that message to that game
+		b. if a game does not exist yet, create a new game
+			i. pass this new game the address, unique id, and the command line args value for who goes first
 #################################################################
 #	Tic-Tac-Toe Protocol Explination			#
 #								#

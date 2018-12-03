@@ -51,7 +51,7 @@ TTT_PRTCL_TERMINATE = 0
 TTT_PRTCL_EXPECTING_NO_RESPONSE = 1
 TTT_PRTCL_EXPECTING_INT_RESPONSE = 2
 TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE = 3
-TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE = 4 #4 is the size of a packed '!I' value
+TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE = 37	#37 is the size of a packed !I value 
 
 
 def recv_server_response():
@@ -82,18 +82,18 @@ def recv_server_response():
 
 	ret_list = []
 	#recv a message length from the server
-	server_msg_len_buf = client_socket.recvfrom(512)#TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
+	server_msg_len_buf = client_socket.recvfrom(TT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
 	if not server_msg_len_buf:
 		return None
 	server_msg_len, = struct.unpack("!I", server_msg_len_buf[0])
 	
-	print("Recving msg of len: ", server_msg_len) #TODO DEBUG  
+	#print("Recving msg of len: ", server_msg_len) #TODO DEBUG  
 	
 	#recv a message from the server	
-	server_msg, = client_socket.recvfrom(4096)#server_msg_len)#recvall(server_msg_len).decode()
-	ret_list.append(server_msg.decode()) 
+	server_msg = client_socket.recvfrom(4096)#server_msg_len)#recvall(server_msg_len).decode()
+	ret_list.append(server_msg[0].decode())
 
-	print("Recved msg: ", server_msg[0])	#TODO DEBUG
+	#print("Recved msg: ", server_msg[0])	#TODO DEBUG
 	
 	#recv an int value of the expexted response value
 	expecting_response_buf = client_socket.recvfrom(512)#TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)#recvall(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
@@ -101,7 +101,7 @@ def recv_server_response():
 		return None
 	expecting_response, = struct.unpack("!I", expecting_response_buf[0])
 	
-	print("Expecting response val: ", expecting_response)	#TODO DEBUG
+	#print("Expecting response val: ", expecting_response)	#TODO DEBUG
 	
 	#add expcted response value to list	
 	try:
@@ -199,7 +199,6 @@ def play_game(argv):
 		print ("Awaiting server response...")
 		server_response = recv_server_response()
 		#check if termination message
-		print("GOT: ", server_response)
 		if server_response[0] == TTT_PRTCL_TERMINATE:
 			#print the server message
 			print(server_response[1])

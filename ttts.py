@@ -38,24 +38,15 @@
 from _thread import *	#_thread for python3, thread for python 2.7
 from socket import *
 from random import shuffle 
-import sys, select, struct, asyncio 
+import sys, select, struct, asyncio
+from traceback import print_exc
 
-				
-#SETUP UDP DATAGRAM SOCKET
-SOCK = socket(AF_INET, SOCK_DGRAM)
-TTT_SERVER_PORT = 13037
-SOCK.bind(('',TTT_SERVER_PORT))
-
-#CONSTANTS & GLOBALS
+#TTT SPECIFIC CONSTANTS & GLOBALS
 SERVER_FIRST = 0
 SERVER_MARK = 1
 CLIENT_MARK = 2
 UNUSED_MARK = 0
 CATS_GAME = -1
-
-ACTIVE_GAMES = []	#the global array to store the active games
-ACTIVE_GAMES_IN_USE_MUTEX = False
-UNIQUE_ID_COUNTER = 0	#the global uniqie ID index to ensure no duplicate games
 
 TTT_PRTCL_REQUEST_FIRST_ARGS = "Please send an unsigned int representing if the client wishes to make the first move.\n\t0 -- sever should go first\n\t1 -- client should go first"
 TTT_PRTCL_GOT_FIRST_ARGS_ERR = "Failed to receive proper game initiation arguments. Terminating connection.\nNext time " + TTT_PRTCL_REQUEST_FIRST_ARGS
@@ -69,6 +60,15 @@ TTT_PRTCL_EXPECTING_INT_RESPONSE = 2
 TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE = 3
 TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE = 37 #37 for some reason is the new size of the packed value #4 #4 is the size of a packed '!I' value
 
+TTT_SERVER_PORT = 13037		
+#SETUP UDP DATAGRAM SOCKET
+SOCK = socket(AF_INET, SOCK_DGRAM)
+SOCK.bind(('',TTT_SERVER_PORT))
+print(getfqdn(), gethostbyname(gethostname()), SOCK)
+
+ACTIVE_GAMES = []	#the global array to store the active games
+ACTIVE_GAMES_IN_USE_MUTEX = False
+UNIQUE_ID_COUNTER = 0	#the global uniqie ID index to ensure no duplicate games
 class TTT_Game:
 
 	def __init__(self, addr, uid, turn):
@@ -90,16 +90,21 @@ class TTT_Game:
 		self.board = []
 		for i in range(9):
 			self.board.append(UNUSED_MARK)
-			
-		#set the first players turn 
-		self.turn = SERVER_MARK if turn == SERVER_FIRST else CLIENT_MARK #or self.turn = turn + 1
+				
+		self.turn = SERVER_MARK if turn == SERVER_FIRST else CLIENT_MARK
 		self.server_char = 'X' if turn == SERVER_MARK else 'O' 
 		self.client_char = 'O' if turn == SERVER_MARK else 'X'
 		
+		if self.turn == SERVER_MARK:
+			self.pass_client_message(None) #take server turn 
+			
+		#start the game sequence
+		message = self.get_board_as_string() + TTT_PRTCL_REQUEST_CLIENT_TURN[29:]
+		send_server_response(self.addr, TTT_PRTCL_EXPECTING_INT_RESPONSE, message)
+
 		#we have all the info we need, time to start the game!
 		print("********STARTING GAME ID: {0} ********".format(self.uid))
 		self.print_game_info()		#TODO: DELETE AFTER DEBUG
-
 
 	def print_game_info(self):
 		'''
@@ -368,9 +373,6 @@ class TTT_Game:
 		ARGUMENTS:
 			client_msg -- the message from the client
 		'''
-		if self.awaiting_init_args:
-			self.do_setup(client_msg)
-			return None
 	
 		if self.check_for_win() != UNUSED_MARK:
 			return remove_active_game(self)
@@ -424,8 +426,6 @@ class TTT_Game:
 		message = self.get_board_as_string() + TTT_PRTCL_REQUEST_CLIENT_TURN[29:]
 		send_server_response(self.addr, TTT_PRTCL_EXPECTING_INT_RESPONSE, message)
 			
-		#get and validate client response
-		#get int response from client
 
 
 
@@ -470,12 +470,13 @@ def send_server_response(addr, expecting_response_val, message):
 	'''
 	#pack message response length '!I'
 	#SEND PACKED: MESSAGE RESPONSE LENGTH
-	SOCK.sendto(struct.pack('!I', len(message)), addr)	
+	print(sys.getsizeof(message), sys.getsizeof(message.encode()), sys.getsizeof(struct.pack('!I', len(message))), sys.getsizeof(struct.pack('!I', sys.getsizeof(message))))  
+	SOCK.sendto(struct.pack('!I', sys.getsizeof(message.encode())), addr)	#37
 	#SEND: MESSAGE
-	SOCK.sendto(message.encode(), addr)	
+	SOCK.sendto(message.encode(), addr)	#prev msg
 	#pack expecting response val '!I'
 	#SEND PACKED: EXPECTING RESPONSE VAL
-	SOCK.sendto(struct.pack('!I', expecting_response_val), addr)	
+	SOCK.sendto(struct.pack('!I', expecting_response_val), addr) #37	
 
 #TODO DELETE THIS FUNC?
 def get_client_response():
@@ -541,6 +542,7 @@ def remove_active_game(active_game):
 		False -- something went wrong during closure and removal
 	'''
 	global ACTIVE_GAMES_IN_USE_MUTEX
+	global ACTIVE_GAMES
 	
 	print("********ENDING GAME ID: {0} ********".format(active_game.uid))
 	active_game.print_game_info()		#TODO: DELETE AFTER DEBUG
@@ -552,9 +554,7 @@ def remove_active_game(active_game):
 	elif endgame_status == SERVER_MARK:
 		endgame_message = endgame_message + "\nSorry! Server[{server_char}] Won!\nWINNER: {server_char}\nCLIENT: {client_char}\nSERVER: {server_char}".format(client_char = active_game.client_char, server_char = active_game.server_char)
 	elif endgame_status == CATS_GAME:
-		endgame_message = endgame_message + "\nSorry, Cat's game! You[{client_char}] Tied!\nWINNER: None\nCLIENT: {client_char}\nSERVER: {server_char}".format(client_char = active_game.client_char, server_char = active_game.server_char)
-	elif active_game.awaiting_init_args:
-		endgame_message = endgame_message + "\nENDGAME ERROR:\nCLIENT: {client_char}\nSERVER: {server_char} \n{msg}".format(client_char = active_game.client_char, server_char = active_game.server_char, msg = TTT_PRTCL_REQUEST_FIRST_ARGS)	
+		endgame_message = endgame_message + "\nSorry, Cat's game! You[{client_char}] Tied!\nWINNER: None\nCLIENT: {client_char}\nSERVER: {server_char}".format(client_char = active_game.client_char, server_char = active_game.server_char)	
 	else:
 		#print error message
 		endgame_message = endgame_message + "\nENDGAME ERROR:\nCLIENT: {client_char}\nSERVER: {server_char} ".format(client_char = active_game.client_char, server_char = active_game.server_char)
@@ -585,7 +585,7 @@ def get_active_game_index_or_none(addr):
 		None -- if game not found
 	'''
 	for idx, game in enumerate(ACTIVE_GAMES):
-		if game.addr is addr:
+		if game.addr == addr:
 			return idx
 
 	return None 
@@ -605,7 +605,9 @@ def parse_message_thread(addr, msg):
 	
 	global UNIQUE_ID_COUNTER
 	global ACTIVE_GAMES_IN_USE_MUTEX
-	print("Got message from: ", addr, "\nMsg: ", msg, "\n") #TODO DEBUG
+	global ACTIVE_GAMES
+	
+	print("Got message from: ", addr, "\nMsg: ", msg) #TODO DEBUG
 
 	while ACTIVE_GAMES_IN_USE_MUTEX:
 		pass
@@ -646,13 +648,15 @@ def main():
 			print("From:\n{addr}\nRecv msg:\n{client_message}\n".format(addr = addr, client_message = client_message))
 			if client_message is not None:
 				#create a thread that figures out what to do with the message
-				#start_new_thread(parse_message_thread, (addr, client_message))
-				parse_message_thread(addr, client_message)
-			
+				start_new_thread(parse_message_thread, (addr, client_message))
+
+			for game in ACTIVE_GAMES:
+				print(game.addr, game.uid, game.print_game_info)
 	except KeyboardInterrupt:
 		#dont crash program... allow for cleanup
 		print("\nCLOSING DOWN TIC-TAC-TOE SERVER")
 		SOCK.close()
+		print_exc()
 		sys.exit(0)
 		
 if __name__ == '__main__':
