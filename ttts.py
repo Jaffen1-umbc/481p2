@@ -1,22 +1,16 @@
-#TODO: DEBUG -- CHASE THE ERRORS, I THINK IM STUCK ON A BOTH AWAITING A RESPONSE.
-#TODO: DEBUG -- CHASE THE ERRORS, I THINK IM STUCK ON A BOTH AWAITING A RESPONSE.
-#TODO: DEBUG -- CHASE THE ERRORS, I THINK IM STUCK ON A BOTH AWAITING A RESPONSE.
-#TODO: DEBUG -- CHASE THE ERRORS, I THINK IM STUCK ON A BOTH AWAITING A RESPONSE.
-#TODO: DEBUG -- FIX LOCKING ERRORS
-
-
 #################################################################
 #	Tic-Tac-Toe Server					#
 #	a ttt server that multiple clients may connect to.	#
 #								#
 #	Noah Jaffe						#
-#	TCP Socket Programming					#
+#	UDP Socket Programming					#
 #	CMSC 481						#
-#	11/05/2018						#
+#	12/10/2018						#
 #################################################################
 
 
 ###########################
+#
 # waits for clients to contact it - opens a listining TCP socket and maintains an open socket until game ends
 # when client opens a connection to the server listining port
 #	the server begins the game making the first or 2nd move depending on client
@@ -38,7 +32,7 @@
 from _thread import *	#_thread for python3, thread for python 2.7
 from socket import *
 from random import shuffle 
-import sys, select, struct, asyncio
+import sys, select, struct, time
 from traceback import print_exc
 
 #TTT SPECIFIC CONSTANTS & GLOBALS
@@ -58,13 +52,16 @@ TTT_PRTCL_TERMINATE = 0
 TTT_PRTCL_EXPECTING_NO_RESPONSE = 1
 TTT_PRTCL_EXPECTING_INT_RESPONSE = 2
 TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE = 3
+TTT_PRTCL_TIMEOUT = 5 #5 sec of timeout
+TTT_PRTCL_MAX_TIMEOUT = 120
 TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE = 37 #37 for some reason is the new size of the packed value #4 #4 is the size of a packed '!I' value
 
 TTT_SERVER_PORT = 13037		
 #SETUP UDP DATAGRAM SOCKET
 SOCK = socket(AF_INET, SOCK_DGRAM)
+SOCK.setblocking(False)
+#SOCK.setblocking(True)
 SOCK.bind(('',TTT_SERVER_PORT))
-print(getfqdn(), gethostbyname(gethostname()), SOCK)
 
 ACTIVE_GAMES = []	#the global array to store the active games
 ACTIVE_GAMES_IN_USE_MUTEX = False
@@ -100,6 +97,7 @@ class TTT_Game:
 			
 		#start the game sequence
 		message = self.get_board_as_string() + TTT_PRTCL_REQUEST_CLIENT_TURN[29:]
+		self.last_request_time = time.mktime(time.localtime())
 		send_server_response(self.addr, TTT_PRTCL_EXPECTING_INT_RESPONSE, message)
 
 		#we have all the info we need, time to start the game!
@@ -369,6 +367,22 @@ class TTT_Game:
 	def pass_client_message(self, client_msg):
 		'''
 		Parses the message from the client and executes the proper action.
+
+		a. checks self game state for if the game has already ended
+			i. if game has ended then send a terminate message to client, remove self from ACTIVE_GAMES, return from pass_client_message
+		b. checks for if it is currently the clients turn
+			i. if input is None or 9 then send a terminate message to client, remove self from ACTIVE_GAMES, return from pass_client_message
+			ii. else check the validity of the input (single digits only)
+				1. try to make the client move
+					a. if successful, change the turns
+					b. if failure, print some error message
+		c. checks for if it is the servers turn (will execute after [pass_client_message.b] completed)
+			i. try to make the server move
+				1. if successful, change the turns
+				2. if failure, print some error message
+		d. checks self game state for if the game has ended
+			i. if game has ended then send a terminate message to client, remove self from ACTIVE_GAMES, return from pass_client_message
+		e. sends an updated game board to the client with EXPECTING INT RESPONSE
 		
 		ARGUMENTS:
 			client_msg -- the message from the client
@@ -378,27 +392,24 @@ class TTT_Game:
 			return remove_active_game(self)
 		
 		#if client turn
-		if self.get_turn() == CLIENT_MARK:
+		if self.get_turn() == CLIENT_MARK and client_msg is not None:
 			
-			#GET RESPONSE
-			client_move = client_msg
-
 			#if client move is None, it most likely means user process terminated, 
 			#or if client move is 9, it means they requested to exit,
 			#so terminate connetion
-			if client_move is None or client_move == 9:
-				print("ERROR @ ttts.py::TTT_Game::pass_client_message(): GOT USER RESPONSE OF " + str(client_move) + ". TERMINATING SERVER-CLIENT SESSION." + "\nGAME ID: {0}".format(self.uid))
+			if client_msg is None or client_msg == 9:
+				print("ERROR @ ttts.py::TTT_Game::pass_client_message(): GOT USER RESPONSE OF " + str(client_msg) + ". TERMINATING SERVER-CLIENT SESSION." + "\nGAME ID: {0}".format(self.uid))
 				#close down game
 				return remove_active_game(self)
 
 			#else if we got an invalid response, log error and continue
-			elif not validate_TTT_PRTCL("SRVR_RECV_REQUEST_SINGLE_DIGIT_INPUT", client_move):
+			elif not validate_TTT_PRTCL("SRVR_RECV_REQUEST_SINGLE_DIGIT_INPUT", client_msg):
 				print("ERROR @ ttts.py::TTT_Game::pass_client_message(): GOT INVALID INPUT FROM CLIENT." + "\nGAME ID: {0}".format(self.uid))
 
 			#else we got a valid response
 			else:
 				#attempt to make the client move
-				if self.make_client_move(int(client_move)):
+				if self.make_client_move(int(client_msg)):
 					#change turns if valid move
 					self.change_turn()
 				else:
@@ -424,10 +435,9 @@ class TTT_Game:
 		#send game board and instructions to client, along with expecting int response
 		#SEND REQUEST FOR CLIENT MOVE 
 		message = self.get_board_as_string() + TTT_PRTCL_REQUEST_CLIENT_TURN[29:]
+		self.last_request_time = time.mktime(time.localtime())
 		send_server_response(self.addr, TTT_PRTCL_EXPECTING_INT_RESPONSE, message)
 			
-
-
 
 def validate_TTT_PRTCL(protocol_id, recv):
 	'''
@@ -470,13 +480,13 @@ def send_server_response(addr, expecting_response_val, message):
 	'''
 	#pack message response length '!I'
 	#SEND PACKED: MESSAGE RESPONSE LENGTH
-	print(sys.getsizeof(message), sys.getsizeof(message.encode()), sys.getsizeof(struct.pack('!I', len(message))), sys.getsizeof(struct.pack('!I', sys.getsizeof(message))))  
-	SOCK.sendto(struct.pack('!I', sys.getsizeof(message.encode())), addr)	#37
+	encoded = message.encode()
+	SOCK.sendto(struct.pack('!I', sys.getsizeof(encoded)), addr) #send size of 37
 	#SEND: MESSAGE
-	SOCK.sendto(message.encode(), addr)	#prev msg
+	SOCK.sendto(encoded, addr) #send variable size
 	#pack expecting response val '!I'
 	#SEND PACKED: EXPECTING RESPONSE VAL
-	SOCK.sendto(struct.pack('!I', expecting_response_val), addr) #37	
+	SOCK.sendto(struct.pack('!I', expecting_response_val), addr) #send size of 37	
 
 #TODO DELETE THIS FUNC?
 def get_client_response():
@@ -484,7 +494,7 @@ def get_client_response():
 	Recv's one message from the client:
 	1. <unsigned int> a response value (packed)
 
-	RECIEVING FROM CLIENT TO SERVER:
+	RECEIEVING FROM CLIENT TO SERVER:
 		RECV PACKED: SINGLE DIGIT VAL
 		unpack '!I'
 
@@ -496,14 +506,16 @@ def get_client_response():
 		None -- if there was en error reading the response
 	'''
 	#recv message header
-	digit_buff = SOCK.recvfrom(512)#(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
+	
 	#receive bytes of data for the packed unsigned int from client
 	try:
+		digit_buff = SOCK.recvfrom(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
 		val, = struct.unpack('!I', digit_buff[0])
 		return val, digit_buff[1]
 	except:
-		print ("ERROR @ ttts.py::get_client_response(): RECV INVALID CLIENT MESSAGE:\n{0}".format(digit_buff))
-	return None
+		pass
+		#print ("ERROR @ ttts.py::get_client_response(): RECV INVALID CLIENT MESSAGE:\n{0}".format(None))
+	return None, None
 
 
 def recvall(size):
@@ -560,6 +572,7 @@ def remove_active_game(active_game):
 		endgame_message = endgame_message + "\nENDGAME ERROR:\nCLIENT: {client_char}\nSERVER: {server_char} ".format(client_char = active_game.client_char, server_char = active_game.server_char)
 	
 	#SEND TERMINATION WITH END GAME MESSAGE
+	game.last_request_time = time.mktime(time.localtime())
 	send_server_response(active_game.addr, TTT_PRTCL_TERMINATE, endgame_message)	
 	
 	try:
@@ -589,8 +602,47 @@ def get_active_game_index_or_none(addr):
 			return idx
 
 	return None 
+def game_watcher_thread():
+	'''
+	Periodically call each games pass_client_message so that if a message wasnt 
+	receieved by the client, or a message needs to be sent and hasnt been, it 
+	will be sent again.
+	
+	We want no client to be waiting more than TTT_TIMEOUT seconds between 
+	the time we sent their last server response. This is to ensure client
+	and server are on the same page.
+	'''
+	global ACTIVE_GAMES_IN_USE_MUTEX
+	
+	while 1:
+		#acquire lock
+		while ACTIVE_GAMES_IN_USE_MUTEX:
+				pass
+		ACTIVE_GAMES_IN_USE_MUTEX = True
+		
+		start_time = time.mktime(time.localtime())
+		
+		for game in ACTIVE_GAMES:
+			waiting = time.mktime(time.localtime()) - game.last_request_time
+			if waiting > TTT_PRTCL_TIMEOUT and waiting <= TTT_PRTCL_MAX_TIMEOUT:
+				#its been too long, lets send the message again to make sure
+				#they got it.
+				funcptr = game.pass_client_message
+				start_new_thread(funcptr, (None,))
+			'''
+			#TODO - do i want to delete the game if its been too long?
+			elif waiting > TTT_PRTCL_MAX_TIMEOUT:
+				#start a new thread to remove the active game so that when this
+				#loop releases the lock, it will remove the game
+				start_new_thread(remove_active_game, (game))
+			'''
+		#release lock
+		ACTIVE_GAMES_IN_USE_MUTEX = False 
 
-
+		exec_time = time.mktime(time.localtime()) - start_time
+		sleep_time = TTT_PRTCL_TIMEOUT - exec_time if exec_time < TTT_PRTCL_TIMEOUT else 0.5
+		time.sleep(sleep_time)
+		
 def parse_message_thread(addr, msg):
 	'''
 	Parses a message received. Checks to see if the sender has an existing game, 
@@ -624,6 +676,7 @@ def parse_message_thread(addr, msg):
 
 			#send a request for the server response
 			err_msg = TTT_PRTCL_CLIENT_ERR + "\n" + TTT_PRTCL_REQUEST_FIRST_ARGS
+			self.last_request_time = time.mktime(time.localtime())
 			send_server_response(self.addr, TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE, err_msg) 
 			
 		else:
@@ -637,21 +690,23 @@ def parse_message_thread(addr, msg):
 
 def main():
 	'''
-		main function. Receives messages and starts a thread to figure out what to 
-		do with them.
+	main function. Receives messages and starts a thread to figure out what to 
+	do with them.
 	''' 
 	print ('The server is ready to receive connections')
 	try:
+	
+		start_new_thread(game_watcher_thread, ())
+		
 		while 1:
 			#receive a message.
 			client_message, addr = get_client_response()
-			print("From:\n{addr}\nRecv msg:\n{client_message}\n".format(addr = addr, client_message = client_message))
+			#print("From:\n{addr}\nRecv msg:\n{client_message}\n".format(addr = addr, client_message = client_message)) #TODO DELETE AFTER DEBUG
+			
 			if client_message is not None:
 				#create a thread that figures out what to do with the message
 				start_new_thread(parse_message_thread, (addr, client_message))
-
-			for game in ACTIVE_GAMES:
-				print(game.addr, game.uid, game.print_game_info)
+				
 	except KeyboardInterrupt:
 		#dont crash program... allow for cleanup
 		print("\nCLOSING DOWN TIC-TAC-TOE SERVER")

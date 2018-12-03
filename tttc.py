@@ -35,9 +35,14 @@
 from socket import *
 from socket import error as socket_err
 import getopt, sys, struct
+from threading import Timer
+from subprocess import call
+from os import system, name
 
 #CONSTANTS & GLOBALS
-client_socket = socket(AF_INET, SOCK_DGRAM)
+client_input = None
+client_socket = socket(AF_INET, SOCK_DGRAM )
+client_socket.setblocking(False)
 TTT_SERVER_PORT = 13037
 SERVER_ADDRESS = ('', TTT_SERVER_PORT)
 
@@ -51,6 +56,7 @@ TTT_PRTCL_TERMINATE = 0
 TTT_PRTCL_EXPECTING_NO_RESPONSE = 1
 TTT_PRTCL_EXPECTING_INT_RESPONSE = 2
 TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE = 3
+TTT_PRTCL_RESEND = 4
 TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE = 37	#37 is the size of a packed !I value 
 
 
@@ -79,60 +85,42 @@ def recv_server_response():
 		<MESSAGE> Valid values are:
 			A string with a message.
 	'''
-
 	ret_list = []
-	#recv a message length from the server
-	server_msg_len_buf = client_socket.recvfrom(TT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
-	if not server_msg_len_buf:
-		return None
-	server_msg_len, = struct.unpack("!I", server_msg_len_buf[0])
-	
-	#print("Recving msg of len: ", server_msg_len) #TODO DEBUG  
-	
-	#recv a message from the server	
-	server_msg = client_socket.recvfrom(4096)#server_msg_len)#recvall(server_msg_len).decode()
-	ret_list.append(server_msg[0].decode())
-
-	#print("Recved msg: ", server_msg[0])	#TODO DEBUG
-	
-	#recv an int value of the expexted response value
-	expecting_response_buf = client_socket.recvfrom(512)#TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)#recvall(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
-	if not expecting_response_buf:
-		return None
-	expecting_response, = struct.unpack("!I", expecting_response_buf[0])
-	
-	#print("Expecting response val: ", expecting_response)	#TODO DEBUG
-	
-	#add expcted response value to list	
 	try:
-		ret_list.insert(0, expecting_response)
-	except:
-		#if insertion failed bc of some reason or expecting response is None, then default to termination
-		ret_list.insert(0, TTT_PRTCL_TERMINATE)
-
-	return ret_list
-	
-def recvall(length):
-	'''
-	Receives messages of a specific size (length) from the connection (conn)
-
-	ARGUMENTS:
-		length -- number of bytes to read
-
-	RETURNS:
-		<bytes> -- the (packed/encoded) message from the client
-		None -- if connection failed before reading in the message
-	'''
-	encoded_msg = b''
-	while length:
-		temp = client_socket.recvfrom(length)
-		if not temp:
+		#recv a message length from the server
+		server_msg_len_buf = client_socket.recvfrom(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE) #get size of 37
+		if not server_msg_len_buf:
 			return None
-		encoded_msg += temp
-		length -= len(temp)
+		server_msg_len, = struct.unpack("!I", server_msg_len_buf[0])
+	
+		#print("Recving msg of len: ", server_msg_len) #TODO DEBUG  
+	
+		#recv a message from the server	
+		server_msg = client_socket.recvfrom(int(server_msg_len)) #get the variable sized message
+		ret_list.append(server_msg[0].decode())
 
-	return encoded_msg
-
+		#print("Recved msg: ", server_msg[0])	#TODO DEBUG
+	
+		#recv an int value of the expexted response value
+		expecting_response_buf = client_socket.recvfrom(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE) #get size of 37
+		if not expecting_response_buf:
+			return None
+		expecting_response, = struct.unpack("!I", expecting_response_buf[0])
+	
+		#print("Expecting response val: ", expecting_response)	#TODO DEBUG
+	
+		#add expcted response value to list	
+		try:
+			ret_list.insert(0, expecting_response)
+		except:
+			#if insertion failed bc of some reason or expecting response is None, then default to termination
+			ret_list.insert(0, TTT_PRTCL_TERMINATE)
+		
+		return ret_list
+	except:
+		pass
+	
+	return None 
 
 def parse_cmd_line_args(argv):
 	'''
@@ -153,7 +141,32 @@ def parse_cmd_line_args(argv):
 	
 	return cmd_line_args
 
-
+def read_socket_queue(reply_req):
+	'''
+	ARGUMENTS:
+		reply_req -- what the user was attempting to reply to
+	
+	RETURNS:
+		(<Expecting Response>, <Message>) -- A server reply of the last message 
+		sent by the server, or reply_req if there was nothing waiting. 
+	'''
+	global server_response
+	#client_socket.setblocking(False)
+	#client_socket.settimeout(0.0)
+	ret = False;
+	queue = [()]
+	while queue[-1] is not None:
+		queue.append(recv_server_response())
+	
+	if queue[-1] == () or queue[-1] == reply_req:
+		ret = reply_req
+	else:
+		ret = queue[-1]
+	#client_socket.settimeout(None)
+	#client_socket.setblocking(True)
+	return ret
+	
+	
 def get_single_digit_response(message):
 	'''
 	Propmpts user with message, and gets a single digit from user input.
@@ -161,16 +174,18 @@ def get_single_digit_response(message):
 		<unsigned int> -- a single digit.
 	'''
 	user_input = "default_invalid"
-
+	client_input = None
 	#validate user input
-	while not(user_input.isdigit()):
+	while True:
 		#prompt user with message
 		user_input = input(message)
-	try:
-		return int(user_input[0])
-	except:
-		print("ERROR @ TTTC.py::get_single_digit_response(): FAILED TO INTERPRET USER INPUT... TRYING AGAIN")
-		return get_single_digit_response(message)
+		try:
+			client_input = int(user_input[0])
+			return int(user_input[0])
+		except:
+			print("ERROR @ TTTC.py::get_single_digit_response(): FAILED TO INTERPRET USER INPUT... TRYING AGAIN")
+		user_input = "default_invalid"
+
 		
 def send_single_digit_response(num, addr):
 	'''
@@ -194,33 +209,49 @@ def play_game(argv):
 	'''
 
 	#get next server response
-	server_response = (-1,'')
-	while server_response:
+	server_response = None
+	last_response = None
+	while True:
 		print ("Awaiting server response...")
-		server_response = recv_server_response()
-		#check if termination message
-		if server_response[0] == TTT_PRTCL_TERMINATE:
-			#print the server message
-			print(server_response[1])
-			print("Connection terminating, goodbye.")
-			client_socket.close() 	#TODO: IS THIS VALID?
-			return True
-
-		elif server_response[0] == TTT_PRTCL_EXPECTING_NO_RESPONSE:
-			#print the server message
-			print(server_response[1])
-
-		elif server_response[0] == TTT_PRTCL_EXPECTING_INT_RESPONSE:
-			#send single digit integer response and pass the message prompt to the getter
-			num = get_single_digit_response(server_response[1])
-			send_single_digit_response(num, SERVER_ADDRESS)
-
-		elif server_response[0] == TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE:
-			#send if the client goes first
-			num = parse_cmd_line_args(argv)
-			send_single_digit_response(num, SERVER_ADDRESS)
-			print("successfully set TTT_PRTCL_REQUEST_FIRST_ARGS")
-		
+		if server_response == None:
+			server_response = recv_server_response()
+			
+		if server_response is not None:
+			#check if termination message
+			if server_response[0] == TTT_PRTCL_TERMINATE:
+				#print the server message
+				print(server_response[1])
+				print("Connection terminating, goodbye.")
+				client_socket.close() 	#TODO: IS THIS VALID?
+				return True
+				
+			elif server_response[0] == TTT_PRTCL_EXPECTING_NO_RESPONSE:
+				#print the server message
+				print(server_response[1])
+				server_response = None
+				
+			elif server_response[0] == TTT_PRTCL_EXPECTING_INT_RESPONSE:
+				#send single digit integer response and pass the message prompt to the getter
+				num = get_single_digit_response(server_response[1])
+				temp = read_socket_queue(server_response)
+				if server_response == temp:
+					send_single_digit_response(num, SERVER_ADDRESS)
+					server_response = None
+				else:
+					server_response = temp
+					
+			elif server_response[0] == TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE:
+				#send if the client goes first
+				num = parse_cmd_line_args(argv)
+				temp = read_socket_queue(server_response)
+				if server_response == temp:
+					send_single_digit_response(num, SERVER_ADDRESS)
+					server_response = None
+				else:
+					server_response = temp
+				send_single_digit_response(num, SERVER_ADDRESS)
+				print("successfully set TTT_PRTCL_REQUEST_FIRST_ARGS")
+	
 def main(argv):
 	'''
 	Connect to server and starts the game.

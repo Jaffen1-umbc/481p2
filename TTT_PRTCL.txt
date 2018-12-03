@@ -26,9 +26,28 @@ Client workings:
 Server workings:
 	1. listen to port for messages
 	2. create a new thread to deal with message
-		a. if a game exists between that connection already, send that message to that game
-		b. if a game does not exist yet, create a new game
+		a. if a game exists between that connection already
+			i. call to pass_client_message with the message recived
+		b. else if a game does not exist yet, create a new game
 			i. pass this new game the address, unique id, and the command line args value for who goes first
+			ii. call to pass_client_message with Null(None) message
+
+	pass_client_message(self, client_message)
+		a. checks self game state for if the game has already ended
+			i. if game has ended then send a terminate message to client, remove self from ACTIVE_GAMES, return from pass_client_message
+		b. checks for if it is currently the clients turn
+			i. if input is None or 9 then send a terminate message to client, remove self from ACTIVE_GAMES, return from pass_client_message
+			ii. else check the validity of the input (single digits only)
+				1. try to make the client move
+					a. if successful, change the turns
+					b. if failure, print some error message
+		c. checks for if it is the servers turn (will execute after [pass_client_message.b] completed)
+			i. try to make the server move
+				1. if successful, change the turns
+				2. if failure, print some error message
+		d. checks self game state for if the game has ended
+			i. if game has ended then send a terminate message to client, remove self from ACTIVE_GAMES, return from pass_client_message
+		e. sends an updated game board to the client with EXPECTING INT RESPONSE
 #################################################################
 #	Tic-Tac-Toe Protocol Explination			#
 #								#
