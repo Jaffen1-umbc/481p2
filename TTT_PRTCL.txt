@@ -1,7 +1,6 @@
 #######################################################
 #	UDP - Tic-Tac-Toe Documentation and Explination   #
 #                                                     #
-#                                                     #
 #   Noah Jaffe                                        #
 #   UDP Socket Programming                            #
 #   CMSC 481                                          #
@@ -59,7 +58,23 @@ To start the client:
 	After TTT_PRTCL_MAX_TIMEOUT seconds, the game will 
 	assume the user has disconnected and will delete 
 	the game from its database.
+    
+    To start a game the client must send a 
+    "TTT_FIRST_ARGS" message to the server. The valid 
+    values for these are 0 (if the server should go 
+    first) or 1 (if the client should go first). If the 
+    first message sent to the server is 
+    _TTT_PRTCL_TERMINATE_, the server will not make a 
+    new game.
 	
+    Once the server has gotten a valid first message 
+    from the client, it will create a new game. Please 
+    see the bottom of this document in the section 
+    MAIN CODE CHUNKS EXPLAINED for a detailed guide on
+    what the server is doing and expecting from the 
+    client. And also for a detailed guide on how the 
+    client provided works. 
+    
 #######################################################
 #       PROTOCOL FOR SERVER SENDING TO CLIENT:        #
 #######################################################
@@ -159,7 +174,7 @@ client_socket = ttt_init_client_socket()
 SERVER_ADDRESS = (<serverIP>, ttt._TTT_SERVER_PORT_)
 
 #send a message to server
-ttt.ttt_send_client_msg_to_server(client_socket, <message>, SERVER_ADDRESS)
+ttt.ttt_send_client_msg_to_server(client_socket, <unsigned int>, SERVER_ADDRESS)
 
 #receive a message from the server
 ttt.ttt_recv_client_msg_from_server(client_socket)
@@ -168,27 +183,6 @@ ttt.ttt_recv_client_msg_from_server(client_socket)
 #######################################################
 #             MAIN CODE CHUNKS EXPLAINED              #
 #######################################################
-Client workings:
-
-	1. parse cmd line args
-	2. play the game
-	3. close
-	
->>>	2. play the game:
-		0. add a fake server response that was requesting the first args to the queue 
-		a. get the next item in the queue
-		b. if the item from the queue was sent by the client, and we know the server has last requested a int response
-			i. then send the data to the server
-		c. else if the data was a server response
-			i. print the message from the server
-			ii. check the action required by client:
-				1. terminate connection?
-					a. respond with a TTT_PRTCL_TERMINATE to acknowladge endgame
-					b. close socket and exit game
-				2. expecting first args?
-					-send the start_mark (SERVER_MARK or CLIENT_MARK) for who goes first to the server
-
--------------------------------------------------------
 
 Server workings:
 	1. listen to port for messages
@@ -216,3 +210,24 @@ Server workings:
 		e. sends an updated game board to the client with EXPECTING INT RESPONSE
 -------------------------------------------------------
 
+Client workings:
+
+	1. parse cmd line args
+	2. play the game
+	3. close
+	
+>>>	2. play the game:
+		0. add a fake server response that was requesting the first args to the queue 
+		a. get the next item in the queue
+		b. if the item from the queue was sent by the client, and we know the server has last requested a int response
+			i. then send the data to the server
+		c. else if the data was a server response
+			i. print the message from the server
+			ii. check the action required by client:
+				1. terminate connection?
+					a. respond with a TTT_PRTCL_TERMINATE to acknowladge endgame
+					b. close socket and exit game
+				2. expecting first args?
+					-send the start_mark (SERVER_MARK or CLIENT_MARK) for who goes first to the server
+
+-------------------------------------------------------
