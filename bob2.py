@@ -1,41 +1,10 @@
-#################################################################
-#   Tic-Tac-Toe Client                                          #
-#   a client to connect to the ttt server.                      #
-#                                                               #
-#   Noah Jaffe                                                  #
-#   UDP Socket Programming                                      #
-#   CMSC 481                                                    #
-#   12/05/2018                                                  #
-#################################################################
-
-
-#################################
-# Usage: python tttc.py [-c] [-s serverIP]
-# client starts a game with a TTTS from the given IP address and default port number: 13037
-# client port number should be dynamically allocated
-# client must be able to handle at least these 2 command line options
-# 	-s serverIP
-#		Server - required - specifies the IP address of the server.
-#	-c
-#		Client Start - the client will send the first move.
-#		If the '-c' option is not used, the AI makes the first move.
-# NOTES:
-#
-# SUBMIT:
-#	Working documented code.
-#		For full credit, you must handle multiple clients at a time.
-#	Protocol Specification documenting the messages that are sent between the client 
-#		and the server which would allow someone to develop their own client or 
-#		server to interact with yours.
-#####################################
 from socket import *
+import sys, struct, select, os, time
 from queue import *
 from threading import *
-import sys, struct, select, os, time
 
 
 #CONSTANTS & GLOBALS
-
 #SETUP UDP DATAGRAM SOCKET
 client_socket = socket(AF_INET, SOCK_DGRAM)
 
@@ -63,7 +32,6 @@ def recv_server_response():
 	Receives the size of the next incoming response, and the next incoming response.
 
 	RETURNS:
-		None -- if there was no response or only part of a response
 		server_response -- the response received.
 		[<EXPECTING RESPONSE>, <MESSAGE>]
 		<EXPECTING RESPONSE> Valid values are:
@@ -169,9 +137,6 @@ def get_user_response_thread(shared_queue):
 	return None
 
 def clear_screen():
-	'''
-	Clears the screen to keep it nice and neat.
-	'''
 	try:
 		os.system('cls' if os.name == 'nt' else 'clear')
 	except:
@@ -191,7 +156,6 @@ def parse_cmd_line_args(argv):
 
 	RETURNS: 
 		<START_MARK>, <SERVER_IP>
-		
 		<START_MARK> Valid values are:
 			0 -- server has first move
 			1 -- client has first move
@@ -240,11 +204,7 @@ def play_game(start_mark):
 	last_server_request_type = TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE
 	
 	while client_listener.is_alive() and server_listener.is_alive():
-		#if we want to keep it nice and clear: 
-		os.system("{command} Attempting to clear screen".format(command = 'cls' if os.name == 'nt' else 'clear'))
 		print ("Awaiting server or client response...")
-		
-		#keep sending the first args response until we get something back from the client
 		if shared_queue.qsize() == 0 and last_server_request_type == TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE:
 			shared_queue.put(mock_server_first_args_req)
 
@@ -257,6 +217,8 @@ def play_game(start_mark):
 			
 		elif response[0] == SERVER_MARK:
 			#we are getting a message from the server, print the message
+			#TODO if we want to keep it nice and clear: 
+			os.system("{command} Attempting to clear screen".format(command = 'cls' if os.name == 'nt' else 'clear'))
 			print(response[1][1])
 			last_server_request_type = response[1][0]
 			
@@ -269,7 +231,6 @@ def play_game(start_mark):
 			elif response[1][0] == TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE:
 				#send if the client goes first
 				send_single_digit_response(start_mark, SERVER_ADDRESS)
-				#sleep for 1 second to allow for a slow reply
 				time.sleep(1)
 
 def main(argv):

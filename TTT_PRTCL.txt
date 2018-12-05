@@ -1,28 +1,21 @@
-Server workings:
-	listen to port for messages
-	create a new thread to deal with message
-	
 Client workings:
 	1. parse cmd line args
-	2. send server an int (1 for -c, 0 for not -c)
-	3. play the game
-	4. close
+	2. play the game
+	3. close
 	
-	3. play the game
-		a. get server response
-		b. check response with:
-			i. terminate response?
-				- print msg
-				- close game
-			ii. no response
-				- print msg
-			iii. expecting int response
-				- print prompt and get user response
-				- send response to server
-			iv. expecting first args
-				- if -c, send 1
-				- else send 0
-
+	2. play the game
+		a. add a fake server response that was requesting the first args to the queue 
+		b. get the next item in the queue
+		c. if the item from the queue was sent by the client, and we know the server has last requested a int response
+			i. then send the data to the server
+		d. else if the data was a server response
+			i. print the message from the server
+			ii. check the action required by client:
+				1. terminate connection?
+					- close game
+				2. expecting first args?
+					-send the start_mark (SERVER_MARK or CLIENT_MARK) for who goes first to the server
+	
 Server workings:
 	1. listen to port for messages
 	2. create a new thread to deal with message
@@ -49,31 +42,33 @@ Server workings:
 			i. if game has ended then send a terminate message to client, remove self from ACTIVE_GAMES, return from pass_client_message
 		e. sends an updated game board to the client with EXPECTING INT RESPONSE
 #################################################################
-#	Tic-Tac-Toe Protocol Explination			#
-#								#
-#								#
-#	Noah Jaffe						#
-#	TCP Socket Programming					#
-#	CMSC 481						#
-#	11/05/2018						#
+#	Tic-Tac-Toe Protocol Explination                            #
+#                                                               #
+#                                                               #
+#   Noah Jaffe                                                  #
+#   UDP Socket Programming                                      #
+#   CMSC 481                                                    #
+#   11/05/2018                                                  #
 #################################################################
 
 
 The tic tac toe protocol: 
 TTT_PRTCL: 
 	SENDING FROM SERVER TO CLIENT:
-		pack message response length '!I'		packed_msg_len = struct.pack('!I', <unsigned int>)
-		SEND PACKED: MESSAGE RESPONSE LENGTH		connection.sendall(packed_msg_len)
-		SEND: MESSAGE					connection.sendall(<string>.encode())
-		pack expecting response val '!I'		packed_response_val = struct.pack('!I', <unsigned int>)
-		SEND PACKED: EXPECTING RESPONSE VAL		connection.sendall(packed_response_val)
-
-	RECIEVING FROM SERVER TO CLIENT: 
-		RECV PACKED: MESSAGE RESPONSE LENGTH		packed_msg_len = connection.receive(4)
-		unpack '!I' and .recv that many bytes		msg_len = struct.unpack('!I', packed_msg_len)
-		RECV: MESSAGE					message = connection.receive(msg_len).decode()
-		RECV PACKED: EXPECTING RESPONSE VAL		packed_response_val = connection.receive(4)
-		unpack '!I' and add to ret_list			response_val = struct.unpack('!I', packed_response_val)
+	Encode message string							encoded = message.encode()
+	Pack message response length '!I'
+	SEND PACKED: MESSAGE RESPONSE LENGTH			SOCK.sendto(struct.pack('!I', sys.getsizeof(encoded)), addr) #send size of 37
+	SEND: MESSAGE									SOCK.sendto(encoded, addr) #send variable size
+	pack expecting response val '!I'
+	SEND PACKED: EXPECTING RESPONSE VAL				SOCK.sendto(struct.pack('!I', expecting_response_val), addr) #send size of 37
+	
+	
+	PROTOCOL TO RECIEVE A MESSAGE RECIEVING FROM SERVER TO CLIENT: 
+		RECV PACKED: MESSAGE RESPONSE LENGTH
+		unpack '!I' and .recv that many bytes
+		RECV: MESSAGE
+		RECV PACKED: EXPECTING RESPONSE VAL
+		unpack '!i' and add to ret_list
 
 
 	SENDING FROM CLIENT TO SERVER:

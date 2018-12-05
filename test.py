@@ -4,6 +4,7 @@ import time, sys
 from select import *
 from socket import *
 from traceback import *
+import queue
 ACTIVE_GAMES_IN_USE_MUTEX = False
 ACTIVE_GAMES = []
 server_input = None

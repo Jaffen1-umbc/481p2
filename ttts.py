@@ -497,8 +497,6 @@ def get_client_response():
 		<unsigned int> -- a single digit value
 		None -- if there was en error reading the response
 	'''
-	#recv message header
-	
 	#receive bytes of data for the packed unsigned int from client
 	try:
 		digit_buff = SOCK.recvfrom(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
