@@ -76,7 +76,7 @@ def RECV_MSG_FROM_SERVER():
 	'''
 	RECIEVING FROM SERVER TO CLIENT: 
 		RECV PACKED: MESSAGE RESPONSE LENGTH
-		unpack '!I' and .recv that many bytes
+		unpack '!I' and that many bytes
 		RECV: MESSAGE
 		RECV PACKED: EXPECTING RESPONSE VAL
 		unpack '!i' and add to ret_list

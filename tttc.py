@@ -91,8 +91,6 @@ def recv_server_response():
 		#recv a message from the server	
 		server_msg = client_socket.recvfrom(int(server_msg_len)) #get the variable sized message
 		ret_list.append(server_msg[0].decode())
-
-		#print("Recved msg: ", server_msg[0])	#TODO DEBUG
 	
 		#recv an int value of the expexted response value
 		expecting_response_buf = client_socket.recvfrom(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE) #get size of 37

@@ -27,19 +27,21 @@ Server workings:
 
 	pass_client_message(self, client_message)
 		a. checks self game state for if the game has already ended
-			i. if game has ended then send a terminate message to client, remove self from ACTIVE_GAMES, return from pass_client_message
-		b. checks for if it is currently the clients turn
-			i. if input is None or 9 then send a terminate message to client, remove self from ACTIVE_GAMES, return from pass_client_message
+			i. if game has ended then send an endgame message to the client and return from pass_client_message
+			*if the client had the same game/address as an existing game that 
+			has ended, they can send 9 to delete the game and start anew.
+		b. checks for if it is currently the clients turn and the message passed exists 
+			i. if input 9 then send a terminate message to client, remove self from ACTIVE_GAMES, return from pass_client_message
 			ii. else check the validity of the input (single digits only)
 				1. try to make the client move
 					a. if successful, change the turns
 					b. if failure, print some error message
-		c. checks for if it is the servers turn (will execute after [pass_client_message.b] completed)
+		c. checks for if it is the servers turn (will execute after a client turn [pass_client_message.b] completed)
 			i. try to make the server move
 				1. if successful, change the turns
 				2. if failure, print some error message
 		d. checks self game state for if the game has ended
-			i. if game has ended then send a terminate message to client, remove self from ACTIVE_GAMES, return from pass_client_message
+			i. if game has ended then send a terminate message to client, and return from pass_client_message
 		e. sends an updated game board to the client with EXPECTING INT RESPONSE
 #################################################################
 #	Tic-Tac-Toe Protocol Explination                            #
@@ -54,31 +56,60 @@ Server workings:
 
 The tic tac toe protocol: 
 TTT_PRTCL: 
-	SENDING FROM SERVER TO CLIENT:
-	Encode message string							encoded = message.encode()
-	Pack message response length '!I'
-	SEND PACKED: MESSAGE RESPONSE LENGTH			SOCK.sendto(struct.pack('!I', sys.getsizeof(encoded)), addr) #send size of 37
-	SEND: MESSAGE									SOCK.sendto(encoded, addr) #send variable size
-	pack expecting response val '!I'
-	SEND PACKED: EXPECTING RESPONSE VAL				SOCK.sendto(struct.pack('!I', expecting_response_val), addr) #send size of 37
 	
+SERVER SIDE:
+*Notes:
+	This Tic-Tac-Toe server uses a non-blocking datagram socket.
+	The server has a game watcher function that will try to resend the last 
+	message sent after TTT_PRTCL_TIMEOUT (5) seconds.  
+	Once the server has sent a message, it will resend message after 
 	
-	PROTOCOL TO RECIEVE A MESSAGE RECIEVING FROM SERVER TO CLIENT: 
-		RECV PACKED: MESSAGE RESPONSE LENGTH
-		unpack '!I' and .recv that many bytes
-		RECV: MESSAGE
-		RECV PACKED: EXPECTING RESPONSE VAL
-		unpack '!i' and add to ret_list
-
-
-	SENDING FROM CLIENT TO SERVER:
-		pack single digit val '!I'			packed_int_val = struct.pack('!I', <unsigned int>)
-		SEND PACKED: SINGLE DIGIT VAL			connection.sendall(packed_int_val)
-
-	RECIEVING FROM CLIENT TO SERVER:
-		RECV PACKED: SINGLE DIGIT VAL			packed_int_val = connection.recv(4)
-		unpack '!I'					int_val = struct.unpack('!I', packed_int_val)
-
+	PROTOCOL FOR SERVER SENDING TO CLIENT:
+	
+		1. SEND the packed ('!I') encoded message length 
+			<socket>.sendto(struct.pack('!I', sys.getsizeof(<message>.encode())), <client_address>)
+		2. SEND the encoded message  					
+			<socket>.sendto(<message>.encode(), <client_address>)
+		3. SEND the packed ('!I') expecting response value
+			<socket>.sendto(struct.pack('!I', <expecting_response_val>), <client_address>)
+	
+	PROTOCOL FOR SERVER RECIEVING FROM CLIENT:
+		1. RECV a packed ('!I') value (and the sender's address) 
+			*minimal size to receive should be: TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE (37)
+			<message_tuple> = <socket>.recvfrom(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
+			<message> = struct.unpack('!I', <message_tuple>[0])
+			<client_address> = <message_tuple>[1]
+		
+	PROTOCOL FOR CLIENT SENDING TO SERVER:
+	
+		1. SEND a packed ('!I') value
+			<socket>.sendto(struct.pack('!I', <message>), <server_address>)
+			
+	PROTOCOL FOR CLIENT RECIEVING FROM SERVER:
+		*Notes:
+			Due to the server being a non-blocking datagram socket, it is 
+			possible for the <socket>.recvfrom() function to return None. When 
+			the function returns None for any of the steps for a client 
+			receiving from the server, it is reccomended to go back to step 1 
+			until all 3 RECV are completed successfully.
+			
+		1. RECV the packed ('!I') encoded message length
+			*minimal size to receive should be: TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE (37)
+			<message_len_tuple> = <socket>.recvfrom(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
+			<message_len> = struct.unpack('!I', <message_len_tuple>[0])
+			<server_address> = <message_len_tuple>[1]
+		2. RECV the encoded message
+			*minimal size to receive should be: <message_len>
+			<message_tuple> = <socket>.recvfrom(<message_len>)
+			<message> = <message_tuple>[0].decode()
+			<server_address> = <message_tuple>[1]
+		3. RECV the packed ('!I') expecting response value
+			*minimal size to receive should be: TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE (37)
+			<expecting_response_val_tuple> = <socket>.recvfrom(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
+			<expecting_response_val> = struct.unpack('!I', <expecting_response_val_tuple>[0])
+			<server_address> = <expecting_response_val_tuple>[1]
+	
+				
 CONSTANTS AND GLOBALS:
 ---------------------------------------------------------------------------------------------------
 TTT_SERVER_PORT = 13037
