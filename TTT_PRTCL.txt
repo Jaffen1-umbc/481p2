@@ -1,10 +1,17 @@
 #######################################################
-#	UDP - Tic-Tac-Toe Documentation and Explination   #
+#   UDP - Tic-Tac-Toe Documentation and Explination   #
 #                                                     #
 #   Noah Jaffe                                        #
 #   UDP Socket Programming                            #
 #   CMSC 481                                          #
 #   12/05/2018                                        #
+#                                                     #
+#   In this file:                                     #
+#   How to start the server and client.               #
+#   An explination for the protocols.                 #
+#   An explination for the constants in ttt.py that   #
+#     are used for sending and receiving messages     #
+#     between client and server.                      #
 #######################################################
 
 #######################################################
@@ -122,38 +129,38 @@ To start the client:
 # - valid values for when the server requests the     #
 #   first arguments from the client                   #
 #######################################################
-_TTT_SERVER_FIRST_	=	0
+_TTT_SERVER_FIRST_    =    0
 -------------------------------------------------------
-_TTT_CLIENT_FIRST_	=	1
+_TTT_CLIENT_FIRST_    =    1
 #######################################################
 #               EXPECTING RESPONSE VALS               #
 #######################################################
-_TTT_PRTCL_TERMINATE_						=	9
+_TTT_PRTCL_TERMINATE_                        =    9
 -------------------------------------------------------
-_TTT_PRTCL_EXPECTING_NO_RESPONSE_			=	1
+_TTT_PRTCL_EXPECTING_NO_RESPONSE_            =    1
 -------------------------------------------------------
-_TTT_PRTCL_EXPECTING_INT_RESPONSE_			=	2
+_TTT_PRTCL_EXPECTING_INT_RESPONSE_           =    2
 -------------------------------------------------------
-_TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE_	=	3
+_TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE_    =    3
 #######################################################
 #                   TIMEOUT VALS                      #
 # - seconds of timeout between server resends         #
 # - seconds of no communication until server assumes  #
 #   client quit                                       #
 #######################################################
-_TTT_PRTCL_TIMEOUT_		=	5 
+_TTT_PRTCL_TIMEOUT_        =    5 
 -------------------------------------------------------
-_TTT_PRTCL_MAX_TIMEOUT_	=	600
+_TTT_PRTCL_MAX_TIMEOUT_    =    600
 #######################################################
 #                  SEND & RECV SIZE                   #
 # - the size of a packed '!I' value with the address  #
 #   attached                                          #
 #######################################################
-_TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE_ = 37
+_TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE_    =    37
 #######################################################
 #                     SERVER PORT                     #
 #######################################################
-_TTT_SERVER_PORT_ = 13037
+_TTT_SERVER_PORT_    =    13037
 
 
 
