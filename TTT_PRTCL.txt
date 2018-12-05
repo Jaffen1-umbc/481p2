@@ -1,21 +1,195 @@
+#######################################################
+#	UDP - Tic-Tac-Toe Documentation and Explination   #
+#                                                     #
+#                                                     #
+#   Noah Jaffe                                        #
+#   UDP Socket Programming                            #
+#   CMSC 481                                          #
+#   12/05/2018                                        #
+#######################################################
+
+#######################################################
+#                   HOW TO USE                        #
+#######################################################
+
+To start the server:
+	> python3 ttts.c [-d]
+	
+	*Note: command line arguments accepted:
+		-d
+			Debug - optional
+			Will enable debug output for the server.
+			
+-------------------------------------------------------
+To start the client:
+	> python3 [-c] [-s serverIP] [-d]
+	
+	*Note: command line arguments accepted:
+		-s serverIP
+			Server IP - required 
+			Specifies the IP address of the server.
+		-c
+			Client Start - optional
+			If the '-c' option is used, the client 
+			will make the first move, otherwise, the 
+			server AI will make the first move.
+		-d
+			Debug - optional
+			Will enable debug output for the server.
+	
+#######################################################
+#                    THE PROTOCOL                     #
+#######################################################
+#        SEE ttt.py FOR THE CODE AND FUNCTIONS        #
+#######################################################
+
+#######################################################
+#                   SERVER SIDE:                      #
+#######################################################
+
+*Notes:
+	This TTT server uses a non-blocking datagram 
+	socket.
+	
+	The server has a game watcher function that will 
+	try to resend the last message sent after not 
+	hearing a response from the client for 
+	TTT_PRTCL_TIMEOUT seconds.
+	
+	After TTT_PRTCL_MAX_TIMEOUT seconds, the game will 
+	assume the user has disconnected and will delete 
+	the game from its database.
+	
+#######################################################
+#       PROTOCOL FOR SERVER SENDING TO CLIENT:        #
+#######################################################
+*see ttt module function: ttt_send_server_msg_to_client
+
+	1. SEND the packed ('!I') encoded message length 
+	2. SEND the encoded message  					
+	3. SEND the packed ('!I') expecting response value
+
+#######################################################
+#      PROTOCOL FOR SERVER RECIEVING FROM CLIENT      #
+#######################################################
+*see ttt module function: ttt_recv_server_msg_from_client
+
+	1. RECV a packed ('!I') value
+
+#######################################################
+#                   CLIENT SIDE:                      #
+#######################################################
+
+
+#######################################################
+#        PROTOCOL FOR CLIENT SENDING TO SERVER:       #
+#######################################################
+*see ttt module function: ttt_send_client_msg_to_server
+
+	1. SEND a packed ('!I') value
+			
+#######################################################
+#      PROTOCOL FOR CLIENT RECIEVING FROM SERVER:     #
+#######################################################
+*see ttt module function: ttt_recv_client_msg_from_server
+			
+	1. RECV the packed ('!I') encoded message length
+	2. RECV the encoded message
+	3. RECV the packed ('!I') expecting response value
+	
+	
+#######################################################
+#                CONSTANTS AND GLOBALS:               #
+#######################################################
+-------------------------------------------------------
+#######################################################
+#                    FIRST ARGS                       #
+# - valid values for when the server requests the     #
+#   first arguments from the client                   #
+#######################################################
+_TTT_SERVER_FIRST_	=	0
+-------------------------------------------------------
+_TTT_CLIENT_FIRST_	=	1
+#######################################################
+#               EXPECTING RESPONSE VALS               #
+#######################################################
+_TTT_PRTCL_TERMINATE_						=	9
+-------------------------------------------------------
+_TTT_PRTCL_EXPECTING_NO_RESPONSE_			=	1
+-------------------------------------------------------
+_TTT_PRTCL_EXPECTING_INT_RESPONSE_			=	2
+-------------------------------------------------------
+_TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE_	=	3
+#######################################################
+#                   TIMEOUT VALS                      #
+# - seconds of timeout between server resends         #
+# - seconds of no communication until server assumes  #
+#   client quit                                       #
+#######################################################
+_TTT_PRTCL_TIMEOUT_		=	5 
+-------------------------------------------------------
+_TTT_PRTCL_MAX_TIMEOUT_	=	600
+#######################################################
+#                  SEND & RECV SIZE                   #
+# - the size of a packed '!I' value with the address  #
+#   attached                                          #
+#######################################################
+_TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE_ = 37
+#######################################################
+#                     SERVER PORT                     #
+#######################################################
+_TTT_SERVER_PORT_ = 13037
+
+
+
+#######################################################
+#            TO CREATE YOUR OWN CLIENT               #
+#######################################################
+I have provided a ttt.py that defines all of the 
+functions required to send and recieve from a TTT 
+server. It may also help explain the protocol better.
+An example useage is shown below:
+-------------------------------------------------------
+import ttt
+
+#create a TTT client socket
+client_socket = ttt_init_client_socket()
+
+#set server address here
+SERVER_ADDRESS = (<serverIP>, ttt._TTT_SERVER_PORT_)
+
+#send a message to server
+ttt.ttt_send_client_msg_to_server(client_socket, <message>, SERVER_ADDRESS)
+
+#receive a message from the server
+ttt.ttt_recv_client_msg_from_server(client_socket)
+-------------------------------------------------------
+
+#######################################################
+#             MAIN CODE CHUNKS EXPLAINED              #
+#######################################################
 Client workings:
+
 	1. parse cmd line args
 	2. play the game
 	3. close
 	
-	2. play the game
-		a. add a fake server response that was requesting the first args to the queue 
-		b. get the next item in the queue
-		c. if the item from the queue was sent by the client, and we know the server has last requested a int response
+>>>	2. play the game:
+		0. add a fake server response that was requesting the first args to the queue 
+		a. get the next item in the queue
+		b. if the item from the queue was sent by the client, and we know the server has last requested a int response
 			i. then send the data to the server
-		d. else if the data was a server response
+		c. else if the data was a server response
 			i. print the message from the server
 			ii. check the action required by client:
 				1. terminate connection?
-					- close game
+					a. respond with a TTT_PRTCL_TERMINATE to acknowladge endgame
+					b. close socket and exit game
 				2. expecting first args?
 					-send the start_mark (SERVER_MARK or CLIENT_MARK) for who goes first to the server
-	
+
+-------------------------------------------------------
+
 Server workings:
 	1. listen to port for messages
 	2. create a new thread to deal with message
@@ -25,150 +199,20 @@ Server workings:
 			i. pass this new game the address, unique id, and the command line args value for who goes first
 			ii. call to pass_client_message with Null(None) message
 
-	pass_client_message(self, client_message)
-		a. checks self game state for if the game has already ended
-			i. if game has ended then send an endgame message to the client and return from pass_client_message
-			*if the client had the same game/address as an existing game that 
-			has ended, they can send 9 to delete the game and start anew.
+>>>	pass_client_message(self, client_message)
+		a. checks if game should be ended by client input and game state
+			i. send an endgame message to the client
+			ii. if the client was the one that requested the termination, then
+				delete the game from the active games
 		b. checks for if it is currently the clients turn and the message passed exists 
-			i. if input 9 then send a terminate message to client, remove self from ACTIVE_GAMES, return from pass_client_message
-			ii. else check the validity of the input (single digits only)
+			i. check the validity of the input (single digits only)
 				1. try to make the client move
 					a. if successful, change the turns
-					b. if failure, print some error message
 		c. checks for if it is the servers turn (will execute after a client turn [pass_client_message.b] completed)
 			i. try to make the server move
 				1. if successful, change the turns
-				2. if failure, print some error message
 		d. checks self game state for if the game has ended
 			i. if game has ended then send a terminate message to client, and return from pass_client_message
 		e. sends an updated game board to the client with EXPECTING INT RESPONSE
-#################################################################
-#	Tic-Tac-Toe Protocol Explination                            #
-#                                                               #
-#                                                               #
-#   Noah Jaffe                                                  #
-#   UDP Socket Programming                                      #
-#   CMSC 481                                                    #
-#   11/05/2018                                                  #
-#################################################################
-
-
-The tic tac toe protocol: 
-TTT_PRTCL: 
-	
-SERVER SIDE:
-*Notes:
-	This Tic-Tac-Toe server uses a non-blocking datagram socket.
-	The server has a game watcher function that will try to resend the last 
-	message sent after TTT_PRTCL_TIMEOUT (5) seconds.  
-	Once the server has sent a message, it will resend message after 
-	
-	PROTOCOL FOR SERVER SENDING TO CLIENT:
-	
-		1. SEND the packed ('!I') encoded message length 
-			<socket>.sendto(struct.pack('!I', sys.getsizeof(<message>.encode())), <client_address>)
-		2. SEND the encoded message  					
-			<socket>.sendto(<message>.encode(), <client_address>)
-		3. SEND the packed ('!I') expecting response value
-			<socket>.sendto(struct.pack('!I', <expecting_response_val>), <client_address>)
-	
-	PROTOCOL FOR SERVER RECIEVING FROM CLIENT:
-		1. RECV a packed ('!I') value (and the sender's address) 
-			*minimal size to receive should be: TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE (37)
-			<message_tuple> = <socket>.recvfrom(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
-			<message> = struct.unpack('!I', <message_tuple>[0])
-			<client_address> = <message_tuple>[1]
-		
-	PROTOCOL FOR CLIENT SENDING TO SERVER:
-	
-		1. SEND a packed ('!I') value
-			<socket>.sendto(struct.pack('!I', <message>), <server_address>)
-			
-	PROTOCOL FOR CLIENT RECIEVING FROM SERVER:
-		*Notes:
-			Due to the server being a non-blocking datagram socket, it is 
-			possible for the <socket>.recvfrom() function to return None. When 
-			the function returns None for any of the steps for a client 
-			receiving from the server, it is reccomended to go back to step 1 
-			until all 3 RECV are completed successfully.
-			
-		1. RECV the packed ('!I') encoded message length
-			*minimal size to receive should be: TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE (37)
-			<message_len_tuple> = <socket>.recvfrom(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
-			<message_len> = struct.unpack('!I', <message_len_tuple>[0])
-			<server_address> = <message_len_tuple>[1]
-		2. RECV the encoded message
-			*minimal size to receive should be: <message_len>
-			<message_tuple> = <socket>.recvfrom(<message_len>)
-			<message> = <message_tuple>[0].decode()
-			<server_address> = <message_tuple>[1]
-		3. RECV the packed ('!I') expecting response value
-			*minimal size to receive should be: TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE (37)
-			<expecting_response_val_tuple> = <socket>.recvfrom(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE)
-			<expecting_response_val> = struct.unpack('!I', <expecting_response_val_tuple>[0])
-			<server_address> = <expecting_response_val_tuple>[1]
-	
-				
-CONSTANTS AND GLOBALS:
----------------------------------------------------------------------------------------------------
-TTT_SERVER_PORT = 13037
----------------------------------------------------------------------------------------------------
-TTT_PRTCL_TERMINATE = 0
----------------------------------------------------------------------------------------------------
-TTT_PRTCL_EXPECTING_NO_RESPONSE = 1
----------------------------------------------------------------------------------------------------
-TTT_PRTCL_EXPECTING_INT_RESPONSE = 2
----------------------------------------------------------------------------------------------------
-TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE = 3
----------------------------------------------------------------------------------------------------
-TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE = 4 #4 is the size of a packed '!I' value
----------------------------------------------------------------------------------------------------
-TTT_PRTCL_REQUEST_FIRST_ARGS = 
-Please send an unsigned int representing if the client wishes to make the first move.
-	0 -- sever should go first
-	1 -- client should go first
----------------------------------------------------------------------------------------------------
-TTT_PRTCL_GOT_FIRST_ARGS_ERR =
-Failed to receive proper game initiation arguments. Terminating connection.
-Next time Please send an unsigned int representing if the client wishes to make the first move.
-	0 -- sever should go first
-	1 -- client should go first
----------------------------------------------------------------------------------------------------
-TTT_PRTCL_INSTRUCTIONS =
-Welcome to Tic Tac Toe!
-Enter [0-8] for the position of your move, or 9 to quit:
-0|1|2
------
-3|4|5
------
-6|7|8
----------------------------------------------------------------------------------------------------
-TTT_PRTCL_INVALID_CLIENT_INPUT = 
-Invalid input, try again.
----------------------------------------------------------------------------------------------------
-TTT_PRTCL_REQUEST_CLIENT_TURN = 
- | | 
------
- | | 
------
- | | 
-Enter [0-8] for the position of your move, or 9 to quit:
----------------------------------------------------------------------------------------------------
-TTT_PRTCL_CLIENT_ERR =
-Sorry, that was invalid input. Please try again.
----------------------------------------------------------------------------------------------------
-
-TO CREATE YOUR OWN CLIENT:
-I have provided a ttt.py that defines the four functions described above and has all of the constants defined inside.
-To use it you just need to import it.
-
-example useage:
-	import ttt
-	...
-	ttt.SEND_FROM_CLIENT_TO_SERVER(my_socket_connection, my_data)
-
-
-
-
+-------------------------------------------------------
 

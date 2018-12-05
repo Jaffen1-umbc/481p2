@@ -34,6 +34,9 @@ from threading import *
 import sys, struct, select, os, time
 
 
+#DEBUG?
+DEBUG = False
+
 #CONSTANTS & GLOBALS
 
 #SETUP UDP DATAGRAM SOCKET
@@ -44,11 +47,10 @@ SERVER_ADDRESS = ('', TTT_SERVER_PORT)
 
 SERVER_MARK = 1
 CLIENT_MARK = 2
-TTT_PRTCL_TERMINATE = 0
+TTT_PRTCL_TERMINATE = 9
 TTT_PRTCL_EXPECTING_NO_RESPONSE = 1
 TTT_PRTCL_EXPECTING_INT_RESPONSE = 2
 TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE = 3
-TTT_PRTCL_RESEND = 4
 TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE = 37	#37 is the size of a packed !I value 
 
 
@@ -86,19 +88,24 @@ def recv_server_response():
 			return None
 		server_msg_len, = struct.unpack("!I", server_msg_len_buf[0])
 	
-		#print("Recving msg of len: ", server_msg_len) #TODO DEBUG  
+		if DEBUG:
+			print("Recving msg of len: ", server_msg_len)
 	
 		#recv a message from the server	
 		server_msg = client_socket.recvfrom(int(server_msg_len)) #get the variable sized message
 		ret_list.append(server_msg[0].decode())
-	
+		
+		if DEBUG:
+			print(server_msg[0].decode())	
+		
 		#recv an int value of the expexted response value
 		expecting_response_buf = client_socket.recvfrom(TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE) #get size of 37
 		if not expecting_response_buf:
 			return None
 		expecting_response, = struct.unpack("!I", expecting_response_buf[0])
 	
-		#print("Expecting response val: ", expecting_response)	#TODO DEBUG
+		if DEBUG:
+			print("Expecting response val: ", expecting_response)	#TODO DEBUG
 	
 		#add expcted response value to list	
 		ret_list.insert(0, expecting_response)
@@ -128,7 +135,6 @@ def get_server_response_thread(shared_queue):
 	while True:
 		try:
 			while shared_queue.qsize() == 0:
-				#print("Listining for server input")
 				server_response = recv_server_response()
 				if server_response != None:
 					shared_queue.put((SERVER_MARK, server_response))
@@ -137,6 +143,9 @@ def get_server_response_thread(shared_queue):
 		except:
 			pass
 
+	if DEBUG:
+		print("Exiting server response thread")
+		
 	return None
 
 def get_user_response_thread(shared_queue):
@@ -163,22 +172,21 @@ def get_user_response_thread(shared_queue):
 		except:
 			pass
 					
-#	raise KeyboardInterrupt
+	if DEBUG:
+		print("Exiting user response thread")
+		
 	return None
 
 def clear_screen():
 	'''
 	Clears the screen to keep it nice and neat.
 	'''
-	try:
-		os.system('cls' if os.name == 'nt' else 'clear')
-	except:
-		try:
-			print( chr(27) + "[2J" )
-		except:
-			print("Clearing screen...")
-			print("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n")
-
+	#if we want to keep it nice and clear:
+	x = os.system("{command} Attempting to clear screen".format(command = 'cls' if os.name == 'nt' else 'clear'))
+	
+	if DEBUG and x != 0:
+		print("clear_screen() failed")
+		
 
 	
 def parse_cmd_line_args(argv):
@@ -197,15 +205,20 @@ def parse_cmd_line_args(argv):
 		<SERVER_IP>
 			the server ip
 	'''
+	global DEBUG
 	
 	ttt_server_name = None
 	
 	try:
+		#set debugging status
+		if "-d" in argv:
+			DEBUG = True
+	
 		#set who goes first
-		start_mark = 0		#default is the server starts
+		start_mark = SERVER_FIRST		#default is the server starts
 		if "-c" in argv:
 			start_mark = 1
-			
+		
 		#get server ip
 		for i in range(len(argv)): #for some odd reason i was getting errors with enumerate(argv)
 			if argv[i] == "-s":
@@ -214,7 +227,8 @@ def parse_cmd_line_args(argv):
 	except KeyboardInterrupt:
 		return None
 	except:
-		print("Expected server ip after -s, but got {0}".format(ttt_server_name))
+		if DEBUG:
+			print("Expected server ip after -s, but got {0}".format(ttt_server_name))
 		
 	return start_mark, ttt_server_name
 
@@ -226,6 +240,23 @@ def play_game(start_mark):
 		a message with the active game board and instructions for the client user.
 		an end of game message.
 		an error message.
+		
+	how the main game loop works:
+		0. add a fake server response that was requesting the first args to the queue 
+		
+		a. get the next item in the queue
+		
+		b. if the item from the queue was sent by the client, and we know the server has last requested a int response
+			i. then send the data to the server
+			
+		c. else if the data was a server response
+			i. print the message from the server
+			ii. check the action required by client:
+				1. terminate connection?
+					a. respond with a TTT_PRTCL_TERMINATE to acknowladge endgame
+					b. close socket and exit game
+				2. expecting first args?
+					-send the start_mark (SERVER_MARK or CLIENT_MARK) for who goes first to the server
 	'''
 	shared_queue = Queue()
 	client_listener = Thread(target=get_user_response_thread,name='CLIENT_LISNTENER_THREAD',args=(shared_queue,),daemon=True)
@@ -236,19 +267,20 @@ def play_game(start_mark):
 	mock_server_first_args_req = (SERVER_MARK, (TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE, "Attempting to connect to server"))
 
 	last_server_request_type = TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE
+	#keep sending the first args response until we get something back from the client
+	#if shared_queue.qsize() == 0 and last_server_request_type == TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE:
+	shared_queue.put(mock_server_first_args_req)
 	
+	#start main game loop
 	while client_listener.is_alive() and server_listener.is_alive():
-		#if we want to keep it nice and clear: 
-		os.system("{command} Attempting to clear screen".format(command = 'cls' if os.name == 'nt' else 'clear'))
-		print ("Awaiting server or client response...")
-		
-		#keep sending the first args response until we get something back from the client
-		if shared_queue.qsize() == 0 and last_server_request_type == TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE:
-			shared_queue.put(mock_server_first_args_req)
-
-
+		#get a server or client response
 		response = shared_queue.get()
-
+		
+		clear_screen()
+		
+		if DEBUG:
+			print("Awaiting server or client response...")
+		
 		if response[0] == CLIENT_MARK and last_server_request_type == TTT_PRTCL_EXPECTING_INT_RESPONSE:
 			#valid reason to send
 			send_single_digit_response(response[1], SERVER_ADDRESS)
@@ -260,15 +292,15 @@ def play_game(start_mark):
 			
 			if response[1][0] == TTT_PRTCL_TERMINATE:
 				#print the server message
+				print("Acknowlading terminate connection message...")
+				send_single_digit_response(TTT_PRTCL_TERMINATE, SERVER_ADDRESS)
 				print("Connection terminating, goodbye.")
-				client_socket.close() 	#TODO: IS THIS VALID?
+				client_socket.close()
 				return True
 				
 			elif response[1][0] == TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE:
 				#send if the client goes first
 				send_single_digit_response(start_mark, SERVER_ADDRESS)
-				#sleep for 1 second to allow for a slow reply
-				time.sleep(1)
 
 def main(argv):
 	'''
