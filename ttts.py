@@ -1,39 +1,37 @@
 #################################################################
-#	Tic-Tac-Toe Server					#
-#	a ttt server that multiple clients may connect to.	#
-#								#
-#	Noah Jaffe						#
-#	UDP Socket Programming					#
-#	CMSC 481						#
-#	12/10/2018						#
+#   Tic-Tac-Toe Server                                          #
+#   a ttt server that multiple clients may connect to.          #
+#                                                               #
+#   Noah Jaffe                                                  #
+#   UDP Socket Programming                                      #
+#   CMSC 481                                                    #
+#   12/10/2018                                                  #
 #################################################################
 
 
 ###########################
 #
-# waits for clients to contact it - opens a listining TCP socket and maintains an open socket until game ends
-# when client opens a connection to the server listining port
-#	the server begins the game making the first or 2nd move depending on client
-# server closes the listining socket and exits gracefully when ctrl+c is pressed on command line
+#   When a message is recived, the server checks to see if there is an active game 
+#   from that address, it will pass that game the message from the client. If
+#   there is no game yet, it will create a new game.
+# 	server closes the listining socket and exits gracefully when ctrl+c is pressed on command line
 #
 # NOTES:
 # server stores the  current game state
-# server must keep the board correctly, not overwriting moves and knowing when a win has occurred
-# It can play as stupidly as you like. 
+# server must keep the board correctly, not overwriting moves and knowing when a win has occurred 
 #
 # SUBMIT
 #	Working documented code.
-# 		For partial credit, you must be able to handle one client at a time. 
 #		For full credit, you must handle multiple clients at a time.
 #	Protocol Specification documenting the messages that are sent between the client 
 #		and the server which would allow someone to develop their own client or 
 #		server to interact with yours.
 ###########################
-from _thread import *	#_thread for python3, thread for python 2.7
+from _thread import *	#_thread for python3, thread for python 2.7. Sorry for inconsistency between ttts and tttc, I didn't have to rewrite much of ttts, but I did have to rewrite tttc and needed a better thread version
 from socket import *
 from random import shuffle 
 import sys, select, struct, time
-from traceback import print_exc
+
 
 #TTT SPECIFIC CONSTANTS & GLOBALS
 SERVER_FIRST = 0
@@ -48,24 +46,28 @@ TTT_PRTCL_INSTRUCTIONS = "Welcome to Tic Tac Toe!\nEnter [0-8] for the position 
 TTT_PRTCL_INVALID_CLIENT_INPUT = "Invalid input, try again."
 TTT_PRTCL_REQUEST_CLIENT_TURN = " | | \n-----\n | | \n-----\n | | \nEnter [0-8] for the position of your move, or 9 to quit:\n"
 TTT_PRTCL_CLIENT_ERR = "Sorry, that was invalid input. Please try again."
+
 TTT_PRTCL_TERMINATE = 0
 TTT_PRTCL_EXPECTING_NO_RESPONSE = 1
 TTT_PRTCL_EXPECTING_INT_RESPONSE = 2
 TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE = 3
-TTT_PRTCL_TIMEOUT = 5 #5 sec of timeout
-TTT_PRTCL_MAX_TIMEOUT = 120
-TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE = 37 #37 for some reason is the new size of the packed value #4 #4 is the size of a packed '!I' value
 
-TTT_SERVER_PORT = 13037		
+TTT_PRTCL_TIMEOUT = 5 #5 sec of timeout between resends
+TTT_PRTCL_MAX_TIMEOUT = 600 #if over X sec of no communication, we assume they quit
+
+TTT_PRTCL_PACKED_UNSIGNED_INT_SIZE = 37 #37 is the size of a packed '!I' value with the address attached
+
+TTT_SERVER_PORT = 13037
+
 #SETUP UDP DATAGRAM SOCKET
 SOCK = socket(AF_INET, SOCK_DGRAM)
-SOCK.settimeout(1)
-#SOCK.setblocking(True)
+SOCK.setblocking(False) 
 SOCK.bind(('',TTT_SERVER_PORT))
 
 ACTIVE_GAMES = []	#the global array to store the active games
 ACTIVE_GAMES_IN_USE_MUTEX = False
 UNIQUE_ID_COUNTER = 0	#the global uniqie ID index to ensure no duplicate games
+
 class TTT_Game:
 
 	def __init__(self, addr, uid, turn):
@@ -164,15 +166,6 @@ class TTT_Game:
 		RETURNS:
 			True -- if we were able to make a move
 			False -- if we were unable to make a move
-
-		if self.get_turn() == CLIENT_MARK:
-			print("ERROR @ ttts.py::TTT_Game::take_server_turn(): SERVER ATTEMPTED TO TAKE A TURN DURING PLAYER TURN")
-			return False
-
-		for i, v in enumerate(self.board): 
-			if self.check_valid_move(i): 		
-				self.board[i] = SERVER_MARK
-				return True
 		'''
 		pos = self.get_server_move()
 		if self.check_valid_move(pos):
@@ -488,7 +481,6 @@ def send_server_response(addr, expecting_response_val, message):
 	#SEND PACKED: EXPECTING RESPONSE VAL
 	SOCK.sendto(struct.pack('!I', expecting_response_val), addr) #send size of 37	
 
-#TODO DELETE THIS FUNC?
 def get_client_response():
 	'''
 	Recv's one message from the client:
@@ -516,30 +508,6 @@ def get_client_response():
 		pass
 		#print ("ERROR @ ttts.py::get_client_response(): RECV INVALID CLIENT MESSAGE:\n{0}".format(None))
 	return None, None
-
-
-def recvall(size):
-	'''
-	Receives messages of a specific size (size) from the connection (conn)
-
-	ARGUMENTS:
-		conn -- the connection
-		size -- number of bytes to read
-
-	RETURNS:
-		<bytes> -- the (packed/encoded) message from the client
-		None -- if connection failed before reading in the message
-	'''
-	#recv message header
-	encoded_msg = b''
-	while size:
-		temp = SOCK.recvfrom(size)
-		if not temp:
-			return None
-		encoded_msg += temp
-		size -= len(temp)
-
-	return encoded_msg
 
 def remove_active_game(active_game):
 	'''
@@ -572,25 +540,24 @@ def remove_active_game(active_game):
 		endgame_message = endgame_message + "\nENDGAME ERROR:\nCLIENT: {client_char}\nSERVER: {server_char} ".format(client_char = active_game.client_char, server_char = active_game.server_char)
 	
 	#SEND TERMINATION WITH END GAME MESSAGE
-	game.last_request_time = time.mktime(time.localtime())
+	active_game.last_request_time = time.mktime(time.localtime())
 	send_server_response(active_game.addr, TTT_PRTCL_TERMINATE, endgame_message)	
 	
 	try:
-		#old school locking bc asyncio and await isnt nice
-		while ACTIVE_GAMES_IN_USE_MUTEX:
-			pass
-		ACTIVE_GAMES_IN_USE_MUTEX = True
+		#Apparently .remove and iterating through the same list is thread safe
+#		while ACTIVE_GAMES_IN_USE_MUTEX:
+#			pass
+#		ACTIVE_GAMES_IN_USE_MUTEX = True
 		ACTIVE_GAMES.remove(active_game)
-		ACTIVE_GAMES_IN_USE_MUTEX = False
+#		ACTIVE_GAMES_IN_USE_MUTEX = False
 		return True
 	except:
 		return False
 		
-
 def get_active_game_index_or_none(addr):
 	'''
 	Finds and returns the index of the game with the address given that is in the ACTIVE_GAMES list.
-	Not thread safe, must aquire lock before calling this function.
+	**Not thread safe**, must aquire lock before calling this function.
 	ARGUMENTS:
 		addr -- the address of the connection
 	RETURNS:
@@ -602,6 +569,7 @@ def get_active_game_index_or_none(addr):
 			return idx
 
 	return None 
+	
 def game_watcher_thread():
 	'''
 	Periodically call each games pass_client_message so that if a message wasnt 
@@ -616,9 +584,9 @@ def game_watcher_thread():
 	
 	while 1:
 		#acquire lock
-		while ACTIVE_GAMES_IN_USE_MUTEX:
-				pass
-		ACTIVE_GAMES_IN_USE_MUTEX = True
+		#while ACTIVE_GAMES_IN_USE_MUTEX:
+		#		pass
+		#ACTIVE_GAMES_IN_USE_MUTEX = True
 		
 		start_time = time.mktime(time.localtime())
 		
@@ -637,7 +605,7 @@ def game_watcher_thread():
 				start_new_thread(remove_active_game, (game))
 			'''
 		#release lock
-		ACTIVE_GAMES_IN_USE_MUTEX = False 
+		#ACTIVE_GAMES_IN_USE_MUTEX = False 
 
 		exec_time = time.mktime(time.localtime()) - start_time
 		sleep_time = TTT_PRTCL_TIMEOUT - exec_time if exec_time < TTT_PRTCL_TIMEOUT else 0.5
@@ -661,9 +629,9 @@ def parse_message_thread(addr, msg):
 	
 	print("Got message from: ", addr, "\nMsg: ", msg) #TODO DEBUG
 
-	while ACTIVE_GAMES_IN_USE_MUTEX:
-		pass
-	ACTIVE_GAMES_IN_USE_MUTEX = True
+#	while ACTIVE_GAMES_IN_USE_MUTEX:
+#		pass
+#	ACTIVE_GAMES_IN_USE_MUTEX = True
 	#check if game already exists from the sender
 	current_index = get_active_game_index_or_none(addr)
 
@@ -686,7 +654,7 @@ def parse_message_thread(addr, msg):
 			#bc UNIQUE_ID_COUNTER never goes down we dont need to worry about locks
 			UNIQUE_ID_COUNTER += 1
 	
-	ACTIVE_GAMES_IN_USE_MUTEX = False
+#	ACTIVE_GAMES_IN_USE_MUTEX = False
 
 def main():
 	'''
@@ -695,23 +663,21 @@ def main():
 	''' 
 	print ('The server is ready to receive connections')
 	try:
-	
+		
 		start_new_thread(game_watcher_thread, ())
 		
-		while 1:
+		while True:
 			#receive a message.
 			client_message, addr = get_client_response()
-			#print("From:\n{addr}\nRecv msg:\n{client_message}\n".format(addr = addr, client_message = client_message)) #TODO DELETE AFTER DEBUG
 			
 			if client_message is not None:
-				#create a thread that figures out what to do with the message
+				#create a basic lowlevel thread that figures out what to do with the message
 				start_new_thread(parse_message_thread, (addr, client_message))
 				
 	except KeyboardInterrupt:
 		#dont crash program... allow for cleanup
 		print("\nCLOSING DOWN TIC-TAC-TOE SERVER")
 		SOCK.close()
-		print_exc()
 		sys.exit(0)
 		
 if __name__ == '__main__':

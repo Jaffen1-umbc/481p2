@@ -1,17 +1,17 @@
 #################################################################
-#	Tic-Tac-Toe Client					#
-#	a client to connect to the ttt server.			#
-#								#
-#	Noah Jaffe						#
-#	TCP Socket Programming					#
-#	CMSC 481						#
-#	11/05/2018						#
+#   Tic-Tac-Toe Client                                          #
+#   a client to connect to the ttt server.                      #
+#                                                               #
+#   Noah Jaffe                                                  #
+#   UDP Socket Programming                                      #
+#   CMSC 481                                                    #
+#   12/05/2018                                                  #
 #################################################################
 
 
 #################################
 # Usage: python tttc.py [-c] [-s serverIP]
-# client starts a TCP connection to the server with the given IP address and default port number: 13037
+# client starts a game with a TTTS from the given IP address and default port number: 13037
 # client port number should be dynamically allocated
 # client must be able to handle at least these 2 command line options
 # 	-s serverIP
@@ -20,38 +20,30 @@
 #		Client Start - the client will send the first move.
 #		If the '-c' option is not used, the AI makes the first move.
 # NOTES:
-# server stores the current game state
-# server must keep the board correctly, not overwriting moves and knowing when a win has occurred
-# It can play as stupidly as you like. 
 #
 # SUBMIT:
 #	Working documented code.
-# 		For partial credit, you must be able to handle one client at a time. 
 #		For full credit, you must handle multiple clients at a time.
 #	Protocol Specification documenting the messages that are sent between the client 
 #		and the server which would allow someone to develop their own client or 
 #		server to interact with yours.
 #####################################
 from socket import *
-from socket import error as socket_err
-import getopt, sys, struct
-from threading import Timer
-from subprocess import call
-from os import system, name
+from queue import *
+from threading import *
+import sys, struct, select, os, time
+
 
 #CONSTANTS & GLOBALS
-client_input = None
+
+#SETUP UDP DATAGRAM SOCKET
 client_socket = socket(AF_INET, SOCK_DGRAM)
-client_socket.settimeout(1)
+
 TTT_SERVER_PORT = 13037
 SERVER_ADDRESS = ('', TTT_SERVER_PORT)
 
-TTT_PRTCL_REQUEST_FIRST_ARGS = "Please send an unsigned int representing if the client wishes to make the first move.\n\t0 -- sever should go first\n\t1 -- client should go first"
-TTT_PRTCL_GOT_FIRST_ARGS_ERR = "Failed to receive proper game initiation arguments. Terminating connection.\nNext time " + TTT_PRTCL_REQUEST_FIRST_ARGS
-TTT_PRTCL_INSTRUCTIONS = "Welcome to Tic Tac Toe!\nEnter [0-8] for the position of your move, or 9 to quit:\n0|1|2\n-----\n3|4|5\n-----\n6|7|8\n"
-TTT_PRTCL_INVALID_CLIENT_INPUT = "Invalid input, try again."
-TTT_PRTCL_REQUEST_CLIENT_TURN = " | | \n-----\n | | \n-----\n | | \nEnter [0-8] for the position of your move, or 9 to quit:\n"
-TTT_PRTCL_CLIENT_ERR = "Sorry, that was invalid input. Please try again."
+SERVER_MARK = 1
+CLIENT_MARK = 2
 TTT_PRTCL_TERMINATE = 0
 TTT_PRTCL_EXPECTING_NO_RESPONSE = 1
 TTT_PRTCL_EXPECTING_INT_RESPONSE = 2
@@ -110,83 +102,15 @@ def recv_server_response():
 		#print("Expecting response val: ", expecting_response)	#TODO DEBUG
 	
 		#add expcted response value to list	
-		try:
-			ret_list.insert(0, expecting_response)
-		except:
-			#if insertion failed bc of some reason or expecting response is None, then default to termination
-			ret_list.insert(0, TTT_PRTCL_TERMINATE)
+		ret_list.insert(0, expecting_response)
 		
 		return ret_list
 	except:
 		pass
 	
 	return None 
-
-def parse_cmd_line_args(argv):
-	'''
-	returns an unsigned int value representing if the client has first move or not
-
-	argv -- list with [-c] [-s serverIP]
-
-	RETURNS: 
-		<CLIENT FIRST>
-		<CLIENT FIRST> Valid values are:
-			0 -- server has first move
-			1 -- client has first move
-
-	'''
-	cmd_line_args = 0	#default is the server starts
-	if "-c" in argv:
-		cmd_line_args = 1
 	
-	return cmd_line_args
 
-def read_socket_queue(reply_req):
-	'''
-	ARGUMENTS:
-		reply_req -- what the user was attempting to reply to
-	
-	RETURNS:
-		(<Expecting Response>, <Message>) -- A server reply of the last message 
-		sent by the server, or reply_req if there was nothing waiting. 
-	'''
-	global server_response
-	#client_socket.setblocking(False)
-	#client_socket.settimeout(0.0)
-	ret = False;
-	queue = [()]
-	while queue[-1] is not None:
-		queue.append(recv_server_response())
-	
-	if queue[-1] == () or queue[-1] == reply_req:
-		ret = reply_req
-	else:
-		ret = queue[-1]
-	#client_socket.settimeout(None)
-	#client_socket.setblocking(True)
-	return ret
-	
-	
-def get_single_digit_response(message):
-	'''
-	Propmpts user with message, and gets a single digit from user input.
-	RETURNS:
-		<unsigned int> -- a single digit.
-	'''
-	user_input = "default_invalid"
-	client_input = None
-	#validate user input
-	while True:
-		#prompt user with message
-		user_input = input(message)
-		try:
-			client_input = int(user_input[0])
-			return int(user_input[0])
-		except:
-			print("ERROR @ TTTC.py::get_single_digit_response(): FAILED TO INTERPRET USER INPUT... TRYING AGAIN")
-		user_input = "default_invalid"
-
-		
 def send_single_digit_response(num, addr):
 	'''
 	Sends an unsigned int value to the server
@@ -198,8 +122,105 @@ def send_single_digit_response(num, addr):
 	'''
 	client_socket.sendto(struct.pack('!I', num), addr)
 	
+def get_server_response_thread(shared_queue):
+	'''
+	Thread that gets a message from the client and puts it into the queue.
+	'''
+	while True:
+		try:
+			while shared_queue.qsize() == 0:
+				#print("Listining for server input")
+				server_response = recv_server_response()
+				if server_response != None:
+					shared_queue.put((SERVER_MARK, server_response))
+		except KeyboardInterrupt:
+			return None
+		except:
+			pass
 
-def play_game(argv):
+	return None
+
+def get_user_response_thread(shared_queue):
+	'''
+	Thread that gets user input and if it is valid, it will put it into the queue.
+	'''
+	
+	while True:
+		try:
+			while shared_queue.qsize() == 0:
+				#print("Listining for user input")
+				i, o, e = select.select([sys.stdin],[],[], 0.0001)
+				for s in i:
+					if s == sys.stdin:
+						client_input = sys.stdin.readline()
+						try:
+							#check valid user input
+							temp = int(client_input[0])
+							shared_queue.put((CLIENT_MARK, temp))
+						except:
+							pass
+		except KeyboardInterrupt:
+			return None
+		except:
+			pass
+					
+#	raise KeyboardInterrupt
+	return None
+
+def clear_screen():
+	'''
+	Clears the screen to keep it nice and neat.
+	'''
+	try:
+		os.system('cls' if os.name == 'nt' else 'clear')
+	except:
+		try:
+			print( chr(27) + "[2J" )
+		except:
+			print("Clearing screen...")
+			print("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n")
+
+
+	
+def parse_cmd_line_args(argv):
+	'''
+	returns an unsigned int value representing if the client has first move or not
+
+	argv -- list with [-c] [-s serverIP]
+
+	RETURNS: 
+		<START_MARK>, <SERVER_IP>
+		
+		<START_MARK> Valid values are:
+			0 -- server has first move
+			1 -- client has first move
+
+		<SERVER_IP>
+			the server ip
+	'''
+	
+	ttt_server_name = None
+	
+	try:
+		#set who goes first
+		start_mark = 0		#default is the server starts
+		if "-c" in argv:
+			start_mark = 1
+			
+		#get server ip
+		for i in range(len(argv)): #for some odd reason i was getting errors with enumerate(argv)
+			if argv[i] == "-s":
+				ttt_server_name = argv[i + 1]
+				
+	except KeyboardInterrupt:
+		return None
+	except:
+		print("Expected server ip after -s, but got {0}".format(ttt_server_name))
+		
+	return start_mark, ttt_server_name
+
+
+def play_game(start_mark):
 	'''
 	LOOPS UNTIL GAME IS DONE OR THE CLIENT QUITS
 	recv a message from the server. The message can be any of the following:
@@ -207,51 +228,49 @@ def play_game(argv):
 		an end of game message.
 		an error message.
 	'''
+	shared_queue = Queue()
+	client_listener = Thread(target=get_user_response_thread,name='CLIENT_LISNTENER_THREAD',args=(shared_queue,),daemon=True)
+	server_listener = Thread(target=get_server_response_thread,name='SERVER_LISNTENER_THREAD',args=(shared_queue,),daemon=True)
+	client_listener.start()
+	server_listener.start()
+	
+	mock_server_first_args_req = (SERVER_MARK, (TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE, "Attempting to connect to server"))
 
-	#get next server response
-	server_response = None
-	last_response = None
-	while True:
-		print ("Awaiting server response...")
-		if server_response == None:
-			server_response = recv_server_response()
+	last_server_request_type = TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE
+	
+	while client_listener.is_alive() and server_listener.is_alive():
+		#if we want to keep it nice and clear: 
+    	os.system("{command} Attempting to clear screen".format(command = 'cls' if os.name == 'nt' else 'clear'))
+		print ("Awaiting server or client response...")
+		
+		#keep sending the first args response until we get something back from the client
+		if shared_queue.qsize() == 0 and last_server_request_type == TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE:
+			shared_queue.put(mock_server_first_args_req)
+
+
+		response = shared_queue.get()
+
+		if response[0] == CLIENT_MARK and last_server_request_type == TTT_PRTCL_EXPECTING_INT_RESPONSE:
+			#valid reason to send
+			send_single_digit_response(response[1], SERVER_ADDRESS)
 			
-		if server_response is not None:
-			#check if termination message
-			if server_response[0] == TTT_PRTCL_TERMINATE:
+		elif response[0] == SERVER_MARK:
+			#we are getting a message from the server, print the message
+			print(response[1][1])
+			last_server_request_type = response[1][0]
+			
+			if response[1][0] == TTT_PRTCL_TERMINATE:
 				#print the server message
-				print(server_response[1])
 				print("Connection terminating, goodbye.")
 				client_socket.close() 	#TODO: IS THIS VALID?
 				return True
 				
-			elif server_response[0] == TTT_PRTCL_EXPECTING_NO_RESPONSE:
-				#print the server message
-				print(server_response[1])
-				server_response = None
-				
-			elif server_response[0] == TTT_PRTCL_EXPECTING_INT_RESPONSE:
-				#send single digit integer response and pass the message prompt to the getter
-				num = get_single_digit_response(server_response[1])
-				temp = read_socket_queue(server_response)
-				if server_response == temp:
-					send_single_digit_response(num, SERVER_ADDRESS)
-					server_response = None
-				else:
-					server_response = temp
-					
-			elif server_response[0] == TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE:
+			elif response[1][0] == TTT_PRTCL_EXPECTING_FIRST_ARGS_RESPONSE:
 				#send if the client goes first
-				num = parse_cmd_line_args(argv)
-				temp = read_socket_queue(server_response)
-				if server_response == temp:
-					send_single_digit_response(num, SERVER_ADDRESS)
-					server_response = None
-				else:
-					server_response = temp
-				send_single_digit_response(num, SERVER_ADDRESS)
-				print("successfully set TTT_PRTCL_REQUEST_FIRST_ARGS")
-	
+				send_single_digit_response(start_mark, SERVER_ADDRESS)
+				#sleep for 1 second to allow for a slow reply
+				time.sleep(1)
+
 def main(argv):
 	'''
 	Connect to server and starts the game.
@@ -259,21 +278,19 @@ def main(argv):
 	argv -- list with [-c] [-s serverIP]
 	'''
 	global SERVER_ADDRESS
-	ttt_server_name = 'ERROR'
-	#set server
-	for i, v in enumerate(argv):
-		if v == "-s":
-			ttt_server_name = argv[i + 1]
+	
+	start_mark, ttt_server_name = parse_cmd_line_args(argv)
 	
 	SERVER_ADDRESS = (ttt_server_name, TTT_SERVER_PORT)
-	#notify server we want to make a game so we send it the init args
-	num = parse_cmd_line_args(argv)
-	send_single_digit_response(num, SERVER_ADDRESS)
-	print("Attempted to notify server we wanted to create a game.\nIf message recived is TTT_PRTCL_REQUEST_FIRST_ARGS, something broke and follow instructions.")
+	
 	#play the game
-	play_game(argv)
-
+	try:
+		play_game(start_mark)
+	except:
+		pass
+		
 	client_socket.close()
+	print("Goodbye.")
 	sys.exit(0)
 
 if __name__ == '__main__':
@@ -285,6 +302,6 @@ if __name__ == '__main__':
 
 	#get the argument parts
 	argumentList = fullCmdArguments[1:]
-	
+
 	#send it to main
 	main(argumentList)
